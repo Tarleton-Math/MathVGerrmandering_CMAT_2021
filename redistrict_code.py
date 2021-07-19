@@ -660,14 +660,13 @@ where distance < 1.05 * m
         print(f'Current population imbalance = {pop_imbalance:.2f}% ... setting population imbalance tolerance = {self.pop_tolerance:.2f}%')
         self.districts = self.nodes['district'].unique()
 
-        self.plans = [self.nodes['district'].copy().rename(0)]
+        self.plans = [self.nodes['district'].copy().rename(f'plan_0')]
         for step in range(1,steps+1):
             if self.recomb_step():
-                self.plans.append(self.nodes['district'].copy().rename(step))
-        self.plans = pd.concat(self.plans, axis=1)
-#         self.plans = self.nodes.join(self.plans).drop(columns='district').reset_index()
+                self.plans.append(self.nodes['district'].copy().rename(f'plan_{step}'))
+        self.plans = self.nodes.join(pd.concat(self.plans, axis=1)).drop(columns='district')
         tbl = self.table_id('plans', self.level, f'{self.shapes_yr}_{self.district}')
-        load_table(tbl, df=self.plans.reset_index(), preview_rows=0)
+        load_table(tbl, df=self.plans.reset_index(), overwrite=True, preview_rows=5)
 
 
     def recomb_step(self):
