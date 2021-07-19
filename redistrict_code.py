@@ -83,7 +83,7 @@ def fetch_zip(url, file):
             zipfile = zf.ZipFile(urllib.request.urlretrieve(url, file)[0])
             print(f'processing', end=concat_str)
         except urllib.error.HTTPError:
-            print('\n\nFAILED - BAD URL\n\n')
+            print(f'n\nFAILED - BAD URL\n\n')
             zipfile = None
     return zipfile
 
@@ -127,7 +127,6 @@ class Gerry:
         self.__dict__[key] = val
         
     def __post_init__(self):
-#         self.overwrite = set(self.overwrite).union({'nodes'})
         levels = ['tract', 'bg', 'tabblock']
         assert self.level in levels, f"level must be one of {levels}, got {self.level}"
         district_types = ['cd', 'sldu', 'sldl']
@@ -153,7 +152,14 @@ class Gerry:
         if tbl is None:
             tbl = self.table_id(variable, level, yr)
         f = tbl.split('.')[-1]
-        return data_path / f"{f.replace('_','/')}/{f}.{suffix}"
+        p = f.split('_')
+        p.pop(-1)
+        p = '/'.join(p)
+        return data_path / f"{p}/{f}.{suffix}"
+
+#######################################################################
+############################## Get Data ###############################
+#######################################################################
 
     def get_assignments(self, tbl):
         variable, level, yr, abbr = tbl.split('.')[-1].split('_')
@@ -174,7 +180,6 @@ class Gerry:
                 df.columns = [f'geoid_{self.shapes_yr}', f'{col}_{self.shapes_yr}']
                 L.append(df.set_index(f'geoid_{self.shapes_yr}'))
         df = pd.concat(L, axis=1).reset_index()
-#         self.assignments = df.copy()
         load_table(tbl, df=df)
 
 
@@ -186,7 +191,6 @@ class Gerry:
             df = extract_file(zipfile, fn, sep='|')
             for y in [2010, 2020]:
                 df[f'geoid_{y}'] = df[f'state_{y}'].str.rjust(2,'0') + df[f'county_{y}'].str.rjust(3,'0') + df[f'tract_{y}'].str.rjust(6,'0') + df[f'blk_{y}'].str.rjust(4,'0')
-#         self.crosswalks = df.copy()
         load_table(tbl, df=df)
 
 
@@ -206,14 +210,12 @@ class Gerry:
                 w.pop(-1)
                 df['race'] = '_'.join(w)
                 L.append(df)
-#                 display(df.head(3))
         df = (pd.concat(L, axis=0, ignore_index=True)
               .astype({'votes':int, 'yr':int, 'fips':str, 'vtd':str})
               .query('votes > 0')
               .query("party in ['r', 'd', 'l', 'g']")
               .reset_index()
              )
-        
         c = f'cntyvtd_{self.shapes_yr}'
         df[c] = df['fips'].str.rjust(3, '0') + df['vtd'].str.rjust(6, '0')
         df['alt'] = df['fips'].str.rjust(3, '0') + df['vtd'].str[:-1].str.rjust(6, '0')
@@ -223,14 +225,12 @@ class Gerry:
         unmatched = ~df[c].isin(assign)
         display(df[unmatched].sort_values('votes', ascending=False))
         df.drop(columns=['alt'], inplace=True)
-#         self.elections = df.copy()
         load_table(tbl, df=df)
 
 
     def get_census(self, tbl):
         variable, level, yr, abbr = tbl.split('.')[-1].split('_')
         url = f"https://www2.census.gov/programs-surveys/decennial/{self.census_yr}/data/01-Redistricting_File--PL_94-171/{self.name.replace(' ', '_')}/{self.abbr.lower()}{yr}.pl.zip"
-
         zipfile = fetch_zip(url, self.file_id(tbl=tbl))
         for fn in zipfile.namelist():
             if fn[-3:] == '.pl':
@@ -250,7 +250,7 @@ class Gerry:
                         cmd = 'sed -i "1s/^/' + ','.join(census_columns['joins'] + census_columns[i]) + '\\n/" ' + file
                         os.system(cmd)
                         load_table(tbl+i, file=file)
-        print('joining', end=concat_str)
+        print(f'joining', end=concat_str)
         t = ',\n    '
         query = f"""
 select
@@ -529,11 +529,7 @@ inner join
 on
     E.{geoid} = F.{geoid}
     """
-#         print(query)
         df = bqclient.query(query).result().to_dataframe().rename(columns={geoid:'geoid'})
-#         display(df.dtypes)
-#         mask = df[['cd','sldu','sldl', 'area']].isnull().any(axis=1)
-#         display(df[mask])
         df['party'].fillna('r', inplace=True)
         df['votes'].fillna(0, inplace=True)
         i = df.columns.drop(['party', 'votes', 'candidate', 'office', 'yr'], errors='ignore').to_list()
@@ -541,10 +537,7 @@ on
         df['votes_total'] = df.sum(axis=1)
         df.columns.name = None
         self.nodes = df.reset_index()
-#         display(self.nodes.head(5))
-#         assert 1==2
         load_table(tbl, df=self.nodes, preview_rows=0)
-#         self.nodes = df.copy()
 
 
     def get_data(self):
@@ -555,61 +548,75 @@ on
             ('census', 'tabblock', self.census_yr),
             ('shapes', self.level, self.shapes_yr),
             ('edges', self.level, self.shapes_yr),
-            ('nodes', self.level, self.shapes_yr),
-            ('graph', self.level, self.shapes_yr),
         ]:
-            tbl = self.table_id(variable, level, yr)            
-            msg = f"Get {self.name} " + f"{variable} {level} {yr} "
-            if variable == 'graph':
-                msg += self.district
+            tbl = self.table_id(variable, level, yr)
+            msg = f"Get {self.name} {variable} {level} {yr}"
             print(msg.ljust(44, ' '), end=concat_str)
             try:
                 assert variable not in self.overwrite
                 bqclient.get_table(tbl)
-                print('BigQuery table exists', end=concat_str)
+                print(f'BigQuery table exists', end=concat_str)
             except:
                 getattr(self, f'get_{variable}')(tbl)
-            print('success \n-----------------------------------------------------------------------------------')
+            print(f'success \n-----------------------------------------------------------------------------------')
 
+#######################################################################
+####################### Make graph and run MCMC #######################
+#######################################################################
+            
     def edges_to_graph(self, edges):
         g = f'geoid_{self.shapes_yr}'
         edge_attr = ['distance', 'shared_perim']
         return nx.from_pandas_edgelist(edges, source=f'{g}_x', target=f'{g}_y', edge_attr=edge_attr)
 
-    def get_graph(self, tbl):
-        variable, level, yr, abbr = tbl.split('.')[-1].split('_')
-        g = f'geoid_{yr}'
-        try:
-            self.nodes
-        except:
-            nodes_tbl = self.table_id('nodes', self.level, yr)
+    def get_graph(self):
+        g = f'geoid_{self.shapes_yr}'
+        level, yr = self.level, self.shapes_yr
+        for variable in ['nodes', 'graph']:
+            tbl = self.table_id(variable, level, yr)
+            file = self.file_id(variable, level, f'{yr}_{self.district}', suffix='gpickle')
+            msg = f"Make {self.name} {variable} {level} {yr}"
+            if variable == 'graph':
+                msg += f" {self.district}"
+            print(msg.ljust(44, ' '), end=concat_str)
+            if variable in self.overwrite:
+                if hasattr(self, variable):
+                    delattr(self, variable)
+                bqclient.delete_table(tbl, not_found_ok=True)
+                if file.is_file():
+                    file.unlink()
             try:
-                self.nodes = read_table(nodes_tbl)
+                self[variable]
+                print(f'already defined', end=concat_str)
             except:
-                self.get_nodes(nodes_tbl)
-        self.nodes.set_index('geoid', inplace=True)
-                
-        file = self.file_id(tbl=tbl+'_'+self.district, suffix='gpickle')
-        if variable in self.overwrite and file.is_file():
-            file.unlink()
-        try:
-            self.graph = nx.read_gpickle(file)
-            print('pickle file already exists', end=concat_str)
-        except:
-            print('making graph', end=concat_str)
-            self.edges = read_table(self.table_id('edges', self.level, yr))
-            self.graph = self.edges_to_graph(self.edges)
-            print('connecting districts', end=concat_str)
-            shapes_tbl = self.table_id('shapes', self.level, yr)
-            for dist, nodes in self.nodes.groupby(self.district):
-                while True:
-                    H = self.graph.subgraph(nodes.index)
-                    components = sorted([list(c) for c in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
-                    if len(components) == 1:
-                        break
-                    print(f'\n{self.district.upper()} district {str(dist).rjust(3, " ")} has {str(len(components)).rjust(3, " ")} connected components with {[len(c) for c in components]} nodes ... adding edges to connect', end=concat_str)
-                    c = ["', '".join(components[i]) for i in range(2)]
-                    query = f"""
+                if variable == 'nodes':
+                    try:
+                        self[variable] = read_table(tbl)
+                        print(f'BigQuery table exists', end=concat_str)
+                    except:
+                        self.get_nodes(tbl)
+                    self.nodes.set_index('geoid', inplace=True)
+#                     print(f'success \n-----------------------------------------------------------------------------------')
+                elif variable == 'graph':
+                    try:
+                        self[variable] = nx.read_gpickle(file)
+                        print(f'gpickle file exists', end=concat_str)
+                    except:
+                        print(f'making graph', end=concat_str)
+                        self.edges = read_table(self.table_id('edges', self.level, yr))
+                        self.graph = self.edges_to_graph(self.edges)
+                        print(f'connecting districts', end=concat_str)
+                        shapes_tbl = self.table_id('shapes', self.level, yr)
+                        for dist, nodes in self.nodes.groupby(self.district):
+                            while True:
+                                H = self.graph.subgraph(nodes.index)
+                                components = sorted([list(c) for c in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
+                                print(f'\n{self.name} {level} {yr} {self.district.upper()} district {str(dist).rjust(3, " ")} has {str(len(components)).rjust(3, " ")} connected components with {[len(c) for c in components]} nodes ... adding edges to connect', end=concat_str)
+                                if len(components) == 1:
+                                    break
+
+                                c = ["', '".join(components[i]) for i in range(2)]
+                                query = f"""
 select
     {g}_x,
     {g}_y,
@@ -633,76 +640,96 @@ from (
     )
 where distance < 1.05 * m
 """
-                    new_edges = bqclient.query(query).result().to_dataframe()
-                    self.graph.update(self.edges_to_graph(new_edges))
-                    print('done', end='', flush=True)
-            file.parent.mkdir(parents=True, exist_ok=True)
-            nx.write_gpickle(self.graph, file)
-#         drop_districts = {'cd', 'sldu', 'sldl'}.difference({self.district})
-#         self.nodes = self.nodes.drop(columns=drop_districts).rename(columns={self.district:'district', g:'geoid'})
-        nx.set_node_attributes(self.graph, self.nodes.to_dict('index'))
-
+                                new_edges = bqclient.query(query).result().to_dataframe()
+                                self.graph.update(self.edges_to_graph(new_edges))
+                                print(f'done', end='', flush=True)
+                        file.parent.mkdir(parents=True, exist_ok=True)
+                        nx.set_node_attributes(self.graph, self.nodes.to_dict('index'))
+                        nx.write_gpickle(self.graph, file)
+            print(f'success \n-----------------------------------------------------------------------------------')
 
         
-#     def check_pop_balance(self, T):
-        
+    def MCMC(self, steps=10):
+        self.get_data()
+        self.get_graph()
 
-#         comp = nx.connected_components(T)
-#         next(comp)
-#         s = sum(T.nodes[n]['total_pop'] for n in next(comp))
-#         return abs(s - self.pop_target) <= self.pop_err_max
-        
-#     def recom_step(self):
-#         try:
-#             return self.graph
-#         except:
-#             tbl = self.table_id('graph', self.level, self.shapes_yr)
-#             self.get_graph(tbl)
-        
-        
-        
-#         self.nodes.set_index('geoid', inplace=True)
-#         recom_found = False
-#         attempts = 0
-#         D = self.nodes.groupby('district')
-#         for curr in rng.permutation([(a,b) for a in self.cd_names for b in self.cd_names if a < b]).tolist():
-#             H = self.graph.subgraph(nodes.index)
-            
-#             nodes = self.nodes.query(f'district in {curr}').copy()
-            
-#             trees = []
-#             for i in range(1000):
-#                 w = {e: self.rng.uniform() for e in H.edges}
-#                 nx.set_edge_attributes(H, w, "weight")
-#                 T = nx.minimum_spanning_tree(H, "weight")
-#                 h = hash(tuple(sorted(T.edges)))
-#                 if h not in trees:
-#                     trees.append(h)
-#                     for e in self['rng'].permutation(T.edges):
-#                         attempts += 1
-#                         T.remove_edge(*e)
-#                         if self.check_pop_balance(T):
-#                             recom_found = True
-#                             new = [list(c) for c in nx.connected_components(T)]
-#                             nodes['cd_new'] = 0
-#                             for n, c in zip(new, curr):
-#                                 nodes.loc[n, 'cd_new'] = c
-#                             i = nodes.groupby(['cd','cd_new'])['area'].sum().idxmax()
-#                             if i[0] != i[1]:
-#                                 new[0], new[1] = new[1], new[0]
-#                             for n, c in zip(new, curr):
-#                                 self['bgs'].loc[n, 'cd'] = c
-#                             break
-#                         T.add_edge(*e)
-#                 else:
-#                     print('Got a repeat spanning tree')
-#                 if recom_found:
-#                     break
-#             if recom_found:
-#                 break
-#         self['bgs'].reset_index(inplace=True)
-#         assert recom_found, "No suitable recomb step found"
-#         return recom_found, attempts, trees
+        self.nodes['district'] = self.nodes[self.district].copy()
+        self.pops = self.nodes.groupby('district')['pop_total'].sum()
+        self.pop_ideal = self.pops.mean()
+        self.pop_tolerance = max(10, (np.max(self.pops) - np.min(self.pops)) / self.pop_ideal * 100)
+        print(f'Setting population imbalance tolerance = {self.pop_tolerance:.2f}, which is the value for the current map')
+        self.districts = self.nodes['district'].unique()
+
+        self.maps = [self.nodes['district'].copy()]
+        for step in range(steps):
+            if self.recomb_step():
+                self.maps.append(self.nodes['district'].copy())
+        self.maps = pd.concat(self.maps, axis=0)
+
+
+    def recomb_step(self):
+        recom_found = False
+        for district_pair in rng.permutation([(a,b) for a in self.districts for b in self.districts if a < b]).tolist():
+            N = self.nodes.query(f'district in {district_pair}').copy()
+            H = self.graph.subgraph(N.index)
+            if not nx.is_connected(H):
+                print(f'{district_pair} not connected')
+                continue
+            print(f'{district_pair} connected')
+            pops = self.pops.copy()
+            p0 = pops.pop(district_pair[0])
+            p1 = pops.pop(district_pair[1])
+            pop_pair = p0 + p1
+            pop_min, pop_max = pops.min(), pops.max()
+            trees = []
+            for i in range(100):
+                w = {e: rng.uniform() for e in H.edges}
+                nx.set_edge_attributes(H, w, "weight")
+                T = nx.minimum_spanning_tree(H)
+                h = hash(tuple(sorted(T.edges)))
+#                 print(h, trees)
+                if h not in trees:
+                    trees.append(h)
+                    d = {e: T.degree[e[0]] + T.degree[e[1]] for e in T.edges}
+                    max_tries = 0.02 * len(d)
+#                     print(len(d), max_tries)
+                    d = sorted(d.items(), key=lambda x:x[1], reverse=True)
+                    for i, (e, deg) in enumerate(d):
+                        if i > max_tries:
+                            print(f'I unsuccessfully tried {i} edge cuts for tree {h} - trying a new tree')
+                            break
+                        elif i % 100 == 0:
+                            print(i, e, deg)
+                        T.remove_edge(*e)
+                        comp = nx.connected_components(T)
+                        next(comp)
+                        s = sum(T.nodes[n]['pop_total'] for n in next(comp))
+                        t = pop_pair - s
+                        if t < s:
+                            s, t = t, s
+                        pop_imbalance = (max(t, pop_max) - min(s, pop_min)) / self.pop_ideal * 100
+    #                     print(h, s, t, pop_imbalance)
+                        if pop_imbalance < self.pop_tolerance:
+                            print(f'found split with pop_imbalance={pop_imbalance}')
+                            recom_found = True
+                            new = [list(c) for c in nx.connected_components(T)]
+                            for n, d in zip(new, district_pair):
+                                N.loc[n, 'district_new'] = d
+                            i = N.groupby(['district','district_new'])['area'].sum().idxmax()
+                            if i[0] != i[1]:
+                                new[0], new[1] = new[1], new[0]
+                            for n, d in zip(new, district_pair):
+                                self.nodes.loc[n, 'district'] = d
+                            break
+                        T.add_edge(*e)
+                else:
+                    print(f'Got a repeat spanning tree')
+                if recom_found:
+                    break
+            if recom_found:
+                break
+        assert recom_found, "No suitable recomb step found"
+        return recom_found
         
             
 concat_str = ' ... '
