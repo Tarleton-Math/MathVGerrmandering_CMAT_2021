@@ -6,7 +6,6 @@ from google.cloud import aiplatform, bigquery
 try:
     from google.cloud.bigquery_storage import BigQueryReadClient
 except:
-    os.system('pip install --upgrade google-cloud-bigquery-storage')
     from google.cloud.bigquery_storage import BigQueryReadClient
 import warnings
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
@@ -17,7 +16,7 @@ bqclient   = bigquery.Client(credentials=cred, project=proj)
 root_path  = pathlib.Path(root_path)
 data_path  = root_path / 'redistricting_data'
 bq_dataset = proj_id   +'.redistricting_data'
-rng = np.random.default_rng(seed)
+# rng = np.random.default_rng(seed)
 
 def lower_cols(df):
     df.rename(columns = {x:str(x).lower() for x in df.columns}, inplace=True)
@@ -117,7 +116,7 @@ class Gerry:
         "race='general' and office like 'u.s. rep%'")
     overwrite         : typing.Tuple = ()
     chunk_size        : int = 50000
-    pop_err_max_pct   : float = 10.0
+    max_pop_imbalance : float = 10.0
     clr_seq           : typing.Tuple = tuple(px.colors.qualitative.Antique)
     
     def __getitem__(self, key):
@@ -656,26 +655,32 @@ where distance < 1.05 * m
         self.nodes['district'] = self.nodes[self.district].copy()
         self.pops = self.nodes.groupby('district')['pop_total'].sum()
         self.pop_ideal = self.pops.mean()
-        self.pop_tolerance = max(10, (np.max(self.pops) - np.min(self.pops)) / self.pop_ideal * 100)
-        print(f'Setting population imbalance tolerance = {self.pop_tolerance:.2f}, which is the value for the current map')
+        pop_imbalance = (np.max(self.pops) - np.min(self.pops)) / self.pop_ideal * 100
+        self.pop_tolerance = max(self.max_pop_imbalance, pop_imbalance)
+        print(f'Current population imbalance = {pop_imbalance:.2f}% ... setting population imbalance tolerance = {self.pop_tolerance:.2f}%')
         self.districts = self.nodes['district'].unique()
 
-        self.maps = [self.nodes['district'].copy()]
-        for step in range(steps):
+        self.plans = [self.nodes['district'].copy().rename(0)]
+        for step in range(1,steps+1):
             if self.recomb_step():
-                self.maps.append(self.nodes['district'].copy())
-        self.maps = pd.concat(self.maps, axis=0)
+                self.plans.append(self.nodes['district'].copy().rename(step))
+        self.plans = pd.concat(self.plans, axis=1)
+#         self.plans = self.nodes.join(self.plans).drop(columns='district').reset_index()
+        tbl = self.table_id('plans', self.level, f'{self.shapes_yr}_{self.district}')
+        load_table(tbl, df=self.plans.reset_index(), preview_rows=0)
 
 
     def recomb_step(self):
         recom_found = False
+        min_imbalance = 100
         for district_pair in rng.permutation([(a,b) for a in self.districts for b in self.districts if a < b]).tolist():
             N = self.nodes.query(f'district in {district_pair}').copy()
             H = self.graph.subgraph(N.index)
             if not nx.is_connected(H):
                 print(f'{district_pair} not connected')
                 continue
-            print(f'{district_pair} connected')
+            else:
+                print(f'{district_pair} connected')
             pops = self.pops.copy()
             p0 = pops.pop(district_pair[0])
             p1 = pops.pop(district_pair[1])
@@ -699,7 +704,7 @@ where distance < 1.05 * m
                             print(f'I unsuccessfully tried {i} edge cuts for tree {h} - trying a new tree')
                             break
                         elif i % 100 == 0:
-                            print(i, e, deg)
+                            print(i, e, deg, f'{min_imbalance:.2f}%')
                         T.remove_edge(*e)
                         comp = nx.connected_components(T)
                         next(comp)
@@ -708,6 +713,7 @@ where distance < 1.05 * m
                         if t < s:
                             s, t = t, s
                         pop_imbalance = (max(t, pop_max) - min(s, pop_min)) / self.pop_ideal * 100
+                        min_imbalance = min(min_imbalance, pop_imbalance)
     #                     print(h, s, t, pop_imbalance)
                         if pop_imbalance < self.pop_tolerance:
                             print(f'found split with pop_imbalance={pop_imbalance}')
