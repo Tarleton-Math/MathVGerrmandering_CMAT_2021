@@ -6,6 +6,7 @@ from google.cloud import aiplatform, bigquery
 try:
     from google.cloud.bigquery_storage import BigQueryReadClient
 except:
+    os.system('pip install --upgrade google-cloud-bigquery-storage')
     from google.cloud.bigquery_storage import BigQueryReadClient
 import warnings
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
@@ -301,7 +302,7 @@ inner join (
     ) as E
 on
     D.geoid_{self.census_yr} = E.geoid_{self.census_yr}
-    """
+"""
 
             query = f"""
 select
@@ -314,7 +315,7 @@ from (
     )
 group by
     1
-    """
+"""
 
         query = f"""
 select
@@ -334,7 +335,7 @@ from (
     on
         F.geoid_{self.shapes_yr} = G.geoid_{self.shapes_yr}
     )
-    """
+"""
         load_table(tbl, query=query)
         bqclient.delete_table(geo_tbl)
         bqclient.delete_table(tbl+'1')
@@ -343,7 +344,7 @@ from (
 
     def get_shapes(self, tbl):
         variable, level, yr, abbr = tbl.split('.')[-1].split('_')
-        temp_tbl = tbl + '_temp'
+        raw_tbl = tbl + '_raw'
         url = f"https://www2.census.gov/geo/tiger/TIGER{self.shapes_yr}/{self.level.upper()}"
         if self.shapes_yr == 2010:
             url += '/2010'
@@ -366,7 +367,7 @@ from (
             df.columns = [x[:-2] if x[-2:].isnumeric() else x for x in df.columns]
             df = df[['geoid', 'aland', 'awater', 'intptlon', 'intptlat', 'geometry']].rename(columns={'geoid':f'geoid_{self.shapes_yr}'})
             df['geometry'] = df['geometry'].apply(lambda p: orient(p, -1))
-            load_table(temp_tbl, df=df.to_wkb(), overwrite=a==0)
+            load_table(raw_tbl, df=df.to_wkb(), overwrite=a==0)
             if df.shape[0] < self.chunk_size:
                 break
             else:
@@ -391,14 +392,14 @@ from (
             st_geogpoint(cast(intptlon as float64), cast(intptlat as float64)) as point,
             st_geogfrom(geometry) as geography
         from
-            {temp_tbl}
+            {raw_tbl}
         )
     )
 order by
     geoid_{self.shapes_yr}
-    """
+"""
         load_table(tbl, query=query)
-        bqclient.delete_table(temp_tbl)
+#         bqclient.delete_table(raw_tbl)
 
 
     def get_edges(self, tbl):
@@ -421,7 +422,7 @@ from (
         x.geoid_{self.shapes_yr} < y.geoid_{self.shapes_yr} and st_intersects(x.geography, y.geography)
     )
 where shared_perim > 0.1
-    """
+"""
         load_table(tbl, query=query)
 
 
@@ -453,7 +454,7 @@ inner join
     {self.table_id('assignments', 'tabblock', self.shapes_yr)} as B
 on
     A.{geoid} = B.{geoid}
-    """
+"""
         
         if g < 15:
             query = f"""
@@ -469,7 +470,7 @@ select
 from (
     {query}
     )
-    """
+"""
 
         if abbr != 'TX':
             query = f"""
@@ -480,7 +481,8 @@ select
 from (
     {query}
     ) as C
-    """
+"""
+        
         else:
             t = ' or\n        '
             query = f"""
@@ -501,7 +503,7 @@ left join (
     ) as D
 on
     C.{cntyvtd} = D.{cntyvtd}
-    """
+"""
 
         query = f"""
 select
@@ -527,7 +529,7 @@ inner join
     {self.table_id('shapes', self.level, self.shapes_yr)} as F
 on
     E.{geoid} = F.{geoid}
-    """
+"""
         df = bqclient.query(query).result().to_dataframe().rename(columns={geoid:'geoid'})
         df['party'].fillna('r', inplace=True)
         df['votes'].fillna(0, inplace=True)
@@ -647,27 +649,6 @@ where distance < 1.05 * m
                         nx.write_gpickle(self.graph, file)
             print(f'success \n-----------------------------------------------------------------------------------')
 
-        
-    def MCMC(self, steps=10):
-        self.get_data()
-        self.get_graph()
-
-        self.nodes['district'] = self.nodes[self.district].copy()
-        self.pops = self.nodes.groupby('district')['pop_total'].sum()
-        self.pop_ideal = self.pops.mean()
-        pop_imbalance = (np.max(self.pops) - np.min(self.pops)) / self.pop_ideal * 100
-        self.pop_tolerance = max(self.max_pop_imbalance, pop_imbalance)
-        print(f'Current population imbalance = {pop_imbalance:.2f}% ... setting population imbalance tolerance = {self.pop_tolerance:.2f}%')
-        self.districts = self.nodes['district'].unique()
-
-        self.plans = [self.nodes['district'].copy().rename(f'plan_0')]
-        for step in range(1,steps+1):
-            if self.recomb_step():
-                self.plans.append(self.nodes['district'].copy().rename(f'plan_{step}'))
-        self.plans = self.nodes.join(pd.concat(self.plans, axis=1)).drop(columns='district')
-        tbl = self.table_id('plans', self.level, f'{self.shapes_yr}_{self.district}')
-        load_table(tbl, df=self.plans.reset_index(), overwrite=True, preview_rows=5)
-
 
     def recomb_step(self):
         recom_found = False
@@ -735,6 +716,49 @@ where distance < 1.05 * m
                 break
         assert recom_found, "No suitable recomb step found"
         return recom_found
+
+
+    def MCMC(self, steps=10):
+        variable, level, yr = 'plans', self.level, self.shapes_yr
+        self.get_data()
+        self.get_graph()
+
+        self.nodes['district'] = self.nodes[self.district].copy()
+        self.pops = self.nodes.groupby('district')['pop_total'].sum()
+        self.pop_ideal = self.pops.mean()
+        pop_imbalance = (np.max(self.pops) - np.min(self.pops)) / self.pop_ideal * 100
+        self.pop_tolerance = max(self.max_pop_imbalance, pop_imbalance)
+        print(f'Current population imbalance = {pop_imbalance:.2f}% ... setting population imbalance tolerance = {self.pop_tolerance:.2f}%')
+        self.districts = self.nodes['district'].unique()
+
+        self.plans = [self.nodes['district'].copy().rename(f'plan_0')]
+        for step in range(1,steps+1):
+            if self.recomb_step():
+                self.plans.append(self.nodes['district'].copy().rename(f'plan_{step}'))
+        self.plans = self.nodes.join(pd.concat(self.plans, axis=1)).drop(columns='district')
+        self.write_results()
+        
+        
+    def write_results(self):
+        variable, level, yr = 'plans', self.level, self.shapes_yr
+        tbl = self.table_id(variable, level, f'{yr}_{self.district}')
+        temp_tbl = tbl + '_temp'
+        print(f'loading {temp_tbl}', end=concat_str)
+        load_table(temp_tbl, df=self.plans.reset_index(), overwrite=True)
+        print(f'temp table written{concat_str}joining shapes', end=concat_str)
+        query = f"""
+select
+    A.*,
+    B.geography
+from
+    {temp_tbl} as A
+inner join
+    {self.table_id('shapes', level, yr)} as B
+on
+    A.geoid = B.geoid_{yr}
+"""
+        load_table(tbl, query=query, overwrite=True, preview_rows=5)
+
         
             
 concat_str = ' ... '
