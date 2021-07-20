@@ -771,16 +771,24 @@ on
             query = f"""
 
 select
-    *,
-    case when perim > 0 then 4 * acos(-1) * aland / (perim * perim) else 0 end as polsby_popper
+    plan_{step},
+    pop_total,
+    R,
+    D,
+    G,
+    L,
+    votes_total,
+    case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100) else 0 end as polsby_popper,
+    aland,
+    perim,
+    geography
 from (
     select
         *,
-        st_perimeter(geography) as perim,
+        st_perimeter(geography) as perim
     from (
         select
             plan_{step},
-            st_union_agg(geography) as geography,
             sum(area) as aland,
             round(sum(pop_total)) as pop_total,
             round(sum(R)) as R,
@@ -788,6 +796,7 @@ from (
             round(sum(G)) as G,
             round(sum(L)) as L,
             round(sum(votes_total)) as votes_total,
+            st_union_agg(geography) as geography,
         from
             {tbl}
         group by
@@ -795,7 +804,7 @@ from (
         )
     )
 """
-            load_table(f'{tbl}_{step}', query=query)
+            load_table(f'{tbl}_{step}', query=query, overwrite=True
             
 
         
