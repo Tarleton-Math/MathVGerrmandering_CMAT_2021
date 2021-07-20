@@ -736,6 +736,8 @@ where distance < 1.05 * m
             if self.recomb_step():
                 self.plans.append(self.nodes['district'].copy().rename(f'plan_{step}'))
         self.plans = self.nodes.join(pd.concat(self.plans, axis=1)).drop(columns='district')
+        
+        self.steps = steps+1
         self.write_results()
         
         
@@ -757,7 +759,27 @@ inner join
 on
     A.geoid = B.geoid_{yr}
 """
-        load_table(tbl, query=query, overwrite=True, preview_rows=5)
+        load_table(tbl, query=query)
+        self.write_viz_tables()
+
+
+    def write_viz_tables(self):
+        variable, level, yr = 'plans', self.level, self.shapes_yr
+        tbl = self.table_id(variable, level, f'{yr}_{self.district}')
+        for step in range(self.steps):
+            print(f'Creating viz table for step {step}')
+            query = f"""
+select
+    plan_{step},
+    st_union_agg(geography) as geography,
+    sum(pop_total)
+from
+    {tbl}
+group by
+    1
+"""
+            load_table(f'{tbl}_{step}', query=query)
+            
 
         
             
