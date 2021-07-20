@@ -769,14 +769,31 @@ on
         for step in range(self.steps):
             print(f'Creating viz table for step {step}')
             query = f"""
+
 select
-    plan_{step},
-    st_union_agg(geography) as geography,
-    sum(pop_total)
-from
-    {tbl}
-group by
-    1
+    *,
+    case when perim > 0 then 4 * acos(-1) * aland / (perim * perim) else 0 end as polsby_popper
+from (
+    select
+        *,
+        st_perimeter(geography) as perim,
+    from (
+        select
+            plan_{step},
+            st_union_agg(geography) as geography,
+            sum(area) as aland,
+            round(sum(pop_total)) as pop_total,
+            round(sum(R)) as R,
+            round(sum(D)) as D,
+            round(sum(G)) as G,
+            round(sum(L)) as L,
+            round(sum(votes_total)) as votes_total,
+        from
+            {tbl}
+        group by
+            1
+        )
+    )
 """
             load_table(f'{tbl}_{step}', query=query)
             
