@@ -32,6 +32,8 @@ class Variable(Base):
             print(f'zip exists', end=concat_str)
         except:
             try:
+                self.path.mkdir(parents=True, exist_ok=True)
+                os.chdir(self.path)
                 print(f'getting zip from {self.url}', end=concat_str)
                 self.zipfile = zf.ZipFile(urllib.request.urlretrieve(self.url, self.zip)[0])
                 print(f'finished{concat_str}processing', end=concat_str)
@@ -41,19 +43,17 @@ class Variable(Base):
 
     def get(self):
         print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level}".ljust(44, ' '), end=concat_str)
-        self.path.mkdir(parents=True, exist_ok=True)
-        os.chdir(self.path)
         exists = dict()
         
         exists['df'] = hasattr(self, 'df')
         if exists['df']:
             print(f'dataframe exists', end=concat_str)
-
+        
         exists['tbl'] = check_table(self.tbl)
         if exists['tbl']:
             print(f'{self.level} table exists', end=concat_str)
-        else:
-            exists['raw'] = check_table(self.raw)
-            if exists['raw']:
-                print(f'raw table exists', end=concat_str)
+        
+        exists['raw'] = check_table(self.raw)
+        if exists['raw']:
+            print(f'raw table exists', end=concat_str)
         return exists

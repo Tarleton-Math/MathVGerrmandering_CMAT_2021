@@ -19,7 +19,7 @@ root_path  = pathlib.Path(root_path)
 data_path  = root_path / 'redistricting_data'
 bq_dataset = proj_id   +'.redistricting_data'
 
-Levels = ['tabblock', 'bg', 'tract', 'county', 'state', 'cntyvtd']
+Levels = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd']
 Districts = ['cd', 'sldu', 'sldl']
 Years = [2010, 2020]
 Groups = ['all', 'hl']

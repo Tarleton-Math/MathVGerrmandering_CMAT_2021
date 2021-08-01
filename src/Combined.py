@@ -184,4 +184,3 @@ order by
         delete_table(temp_assign)
         for t in tbls:
             delete_table(t)
-
