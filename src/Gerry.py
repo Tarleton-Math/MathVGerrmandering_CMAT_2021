@@ -36,18 +36,18 @@ class Gerry(Base):
 #         self.edges       = Edges(g=self)
         self.nodes       = Nodes(g=self)
         self.graph       = Graph(g=self)
-        
+        self.pop_ideal = self.get_district_pops().mean()
         
     def get_district_pops(self):
         return self.nodes.df.groupby(self.district)['pop'].sum()
+    
+#     def hash_plan(self)
+        
+#         h = hash(tuple(sorted(T.edges)))
+
 
     def MCMC(self, steps=10):
         self.get_data()
-        P = self.get_district_pops()
-        self.pop_ideal = P.mean()
-        pop_imbalance_current = (P.max() - P.min()) / self.pop_ideal * 100
-        self.pop_imbalance_tol = max(self.pop_imbalance_tol, pop_imbalance_current)
-        print(f'Current population imbalance = {pop_imbalance_current:.2f}% ... setting population imbalance tolerance = {self.pop_imbalance_tol:.2f}%')
 
         d = len(str(steps))
         f = lambda k: f"plan_{str(k).ljust(d, '0')}"

@@ -30,7 +30,6 @@ class Elections(Variable):
         ext = ['_Returns.csv', '_VRTO.csv']
         k = len(ext[0])
         files = [fn[:-k] for fn in self.zipfile.namelist() if fn[-k:]==ext[0]]
-        print()
         L = []
         for fn in files:
             msg = fn.ljust(50, ' ')

@@ -36,16 +36,16 @@ class Graph(Variable):
             G = self.graph
         return sorted([tuple(c) for c in nx.connected_components(G)], key=lambda x:len(x), reverse=True)
 
-                
+        
     def process(self):
         try:
             self.edges = self.g.edges.df
         except:
-            print('get edges first')
+            print(f'get edges first')
             self.g.edges = Edges(g=self.g)
         finally:
             self.edges = self.g.edges.df
-            print('returning to graph')
+            print(f'returning to graph', end=concat_str)
         self.graph = self.edges_to_graph(self.edges)
         nx.set_node_attributes(self.graph, self.nodes[['pop']].to_dict('index'))
         
@@ -93,9 +93,13 @@ where distance < 1.05 * min_distance
                 
                 
     def recomb(self):
-        recom_found = False
-        best_imbalance = 100
         district_pops = self.g.get_district_pops()
+        pop_imbalance_current = (district_pops.max() - district_pops.min()) / self.g.pop_ideal * 100
+        tol = max(self.g.pop_imbalance_tol, pop_imbalance_current)
+        print(f'Current population imbalance = {pop_imbalance_current:.2f}% ... setting population imbalance tolerance = {tol:.2f}%')
+        
+        best_imbalance = 100
+        recom_found = False
         D = district_pops.index
         R = rng.permutation([(a,b) for a in D for b in D if a < b]).tolist()
         for pair in R:
@@ -132,7 +136,7 @@ where distance < 1.05 * min_distance
                             s, t = t, s
                         pop_imbalance = (max(t, P_max) - min(s, P_min)) / self.g.pop_ideal * 100
                         best_imbalance = min(best_imbalance, pop_imbalance)
-                        if pop_imbalance > self.g.pop_imbalance_tol:
+                        if pop_imbalance > tol:
                             T.add_edge(*e)
                         else:
 #                             print(f'found split with pop_imbalance={pop_imbalance.round(1)}')
