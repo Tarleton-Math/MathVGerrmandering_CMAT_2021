@@ -7,7 +7,6 @@ class Graph(Variable):
         self.level = self.g.level
         self.district = self.g.district
         self.nodes = self.g.nodes.df
-        self.edges = self.g.edges.df
         super().__post_init__()
 
 
@@ -39,6 +38,14 @@ class Graph(Variable):
 
                 
     def process(self):
+        try:
+            self.edges = self.g.edges.df
+        except:
+            print('get edges first')
+            self.g.edges = Edges(g=self.g)
+        finally:
+            self.edges = self.g.edges.df
+            print('returning to graph')
         self.graph = self.edges_to_graph(self.edges)
         nx.set_node_attributes(self.graph, self.nodes[['pop']].to_dict('index'))
         
@@ -46,7 +53,7 @@ class Graph(Variable):
         for D, N in self.nodes.groupby(self.district):
             while True:
                 H = self.graph.subgraph(N.index)
-                comp = get_components(H)
+                comp = self.get_components(H)
                 print(f"District {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}", end=concat_str)
                 if len(comp) == 1:
                     print('connected')
@@ -88,8 +95,7 @@ where distance < 1.05 * min_distance
     def recomb(self):
         recom_found = False
         best_imbalance = 100
-        district_pops = self.nodes.groupby(self.district)['pop'].sum()
-        self.pop_ideal = district_pops.mean()
+        district_pops = self.g.get_district_pops()
         D = district_pops.index
         R = rng.permutation([(a,b) for a in D for b in D if a < b]).tolist()
         for pair in R:
@@ -99,7 +105,7 @@ where distance < 1.05 * min_distance
 #                 print(f'{district_pair} not connected')
                 continue
             else:
-                print(f'{district_pair} connected')
+                print(f'{pair} connected')
             P = district_pops.copy()
             p0 = P.pop(pair[0])
             p1 = P.pop(pair[1])
@@ -124,9 +130,9 @@ where distance < 1.05 * min_distance
                         t = q - s
                         if t < s:
                             s, t = t, s
-                        pop_imbalance = (max(t, P_max) - min(s, P_min)) / self.pop_ideal * 100
+                        pop_imbalance = (max(t, P_max) - min(s, P_min)) / self.g.pop_ideal * 100
                         best_imbalance = min(best_imbalance, pop_imbalance)
-                        if pop_imbalance > self.g.max_pop_imbalance:
+                        if pop_imbalance > self.g.pop_imbalance_tol:
                             T.add_edge(*e)
                         else:
                             print(f'found split with pop_imbalance={pop_imbalance.round(1)}')

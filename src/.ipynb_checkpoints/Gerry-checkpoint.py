@@ -12,7 +12,7 @@ class Gerry(Base):
         "office='USSen' and race='general'",
         "office='President' and race='general'",
         "office like 'USRep%' and race='general'")
-    max_pop_imbalance : float = 10.0
+    pop_imbalance_tol : float = 10.0
     node_attrs        : typing.Tuple = ('geoid', 'total', 'aland', 'perim', 'polsby_popper')
     
     def __post_init__(self):
@@ -24,6 +24,7 @@ class Gerry(Base):
         self.__dict__.update(self.state)
 
     def get_data(self):
+        self.tbl = f'{bq_dataset}.plans_{self.state.abbr}_{self.census_yr}_{self.level}_{self.district}'
         self.crosswalks  = Crosswalks(g=self)
         self.assignments = Assignments(g=self)
         self.shapes      = Shapes(g=self)
@@ -32,104 +33,29 @@ class Gerry(Base):
         self.votes_all   = Votes(g=self, group='all')
         self.votes_hl    = Votes(g=self, group='hl')
         self.combined    = Combined(g=self)
-        self.edges       = Edges(g=self)
+#         self.edges       = Edges(g=self)
         self.nodes       = Nodes(g=self)
         self.graph       = Graph(g=self)
-
-
-    def recomb_step(self):
-        recom_found = False
-        best_imbalance = 100
-        district_pops = self.nodes.groupby(self.district)['pop'].sum().to_dict()
-        D = district_pops.keys()
-        P = rng.permutation([(a,b) for a in D for b in D if a < b]).tolist()
         
-        for district_pair in rng.permutation(P):#.tolist():
-            N = self.nodes.query(f'district in {district_pair}').copy()
-            H = self.graph.subgraph(N.index)
-            if not nx.is_connected(H):
-                print(f'{district_pair} not connected')
-                continue
-            else:
-                print(f'{district_pair} connected')
-            pops = self.pops.copy()
-            p0 = pops.pop(district_pair[0])
-            p1 = pops.pop(district_pair[1])
-            pop_pair = p0 + p1
-            pop_min, pop_max = pops.min(), pops.max()
-            trees = []
-            for i in range(100):
-                w = {e: rng.uniform() for e in H.edges}
-                nx.set_edge_attributes(H, w, "weight")
-                T = nx.minimum_spanning_tree(H)
-                h = hash(tuple(sorted(T.edges)))
-#                 print(h, trees)
-                if h not in trees:
-                    trees.append(h)
-                    d = {e: T.degree[e[0]] + T.degree[e[1]] for e in T.edges}
-                    max_tries = 0.02 * len(d)
-#                     print(len(d), max_tries)
-                    d = sorted(d.items(), key=lambda x:x[1], reverse=True)
-                    for i, (e, deg) in enumerate(d):
-                        if i > max_tries:
-                            print(f'I unsuccessfully tried {i} edge cuts for tree {h} - trying a new tree')
-                            break
-                        elif i % 100 == 0:
-                            print(i, e, deg, f'{best_imbalance:.2f}%')
-                        T.remove_edge(*e)
-                        comp = nx.connected_components(T)
-                        next(comp)
-                        s = sum(T.nodes[n]['pop_total'] for n in next(comp))
-                        t = pop_pair - s
-                        if t < s:
-                            s, t = t, s
-                        pop_imbalance = (max(t, pop_max) - min(s, pop_min)) / self.pop_ideal * 100
-                        best_imbalance = min(best_imbalance, pop_imbalance)
-    #                     print(h, s, t, pop_imbalance)
-                        if pop_imbalance < self.pop_tolerance:
-                            print(f'found split with pop_imbalance={pop_imbalance}')
-                            recom_found = True
-                            new = [list(c) for c in nx.connected_components(T)]
-                            for n, d in zip(new, district_pair):
-                                N.loc[n, 'district_new'] = d
-                            i = N.groupby(['district','district_new'])['aland'].sum().idxmax()
-                            if i[0] != i[1]:
-                                new[0], new[1] = new[1], new[0]
-                            for n, d in zip(new, district_pair):
-                                self.nodes.loc[n, 'district'] = d
-                            break
-                        T.add_edge(*e)
-                else:
-                    print(f'Got a repeat spanning tree')
-                if recom_found:
-                    break
-            if recom_found:
-                break
-        assert recom_found, "No suitable recomb step found"
-        return recom_found
-
+        
+    def get_district_pops(self):
+        return self.nodes.df.groupby(self.district)['pop'].sum()
 
     def MCMC(self, steps=10):
-        variable, yr, level = 'plans', self.level, self.shapes_yr
         self.get_data()
-        self.get_graph()
+        P = self.get_district_pops()
+        self.pop_ideal = P.mean()
+        pop_imbalance_current = (P.max() - P.min()) / self.pop_ideal * 100
+        self.pop_imbalance_tol = max(self.pop_imbalance_tol, pop_imbalance_current)
+        print(f'Current population imbalance = {pop_imbalance_current:.2f}% ... setting population imbalance tolerance = {self.pop_imbalance_tol:.2f}%')
 
-        self.nodes['district'] = self.nodes[self.district].copy()
-        self.pops = self.nodes.groupby('district')['pop_total'].sum()
-        self.pop_ideal = self.pops.mean()
-        pop_imbalance = (np.max(self.pops) - np.min(self.pops)) / self.pop_ideal * 100
-        self.pop_tolerance = max(self.max_pop_imbalance, pop_imbalance)
-        print(f'Current population imbalance = {pop_imbalance:.2f}% ... setting population imbalance tolerance = {self.pop_tolerance:.2f}%')
-        self.districts = self.nodes['district'].unique()
-
-        self.plans = [self.nodes['district'].copy().rename(f'plan_0')]
+        self.plans = [self.nodes.df[self.district].copy().rename(f'plan_0')]
         for step in range(1,steps+1):
-            if self.recomb_step():
-                self.plans.append(self.nodes['district'].copy().rename(f'plan_{step}'))
-        self.plans = self.nodes.join(pd.concat(self.plans, axis=1)).drop(columns='district')
+            if self.graph.recomb():
+                self.plans.append(self.nodes[self.district].copy().rename(f'plan_{step}'))
+        self.plans = pd.concat(self.plans, axis=1)
+        load_table(tbl=self.tbl, df=self.plans, preview_rows=0)
         
-        self.steps = steps+1
-        self.write_results()
         
         
     def write_results(self):
