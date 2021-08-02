@@ -104,8 +104,8 @@ where distance < 1.05 * min_distance
             if not nx.is_connected(H):
 #                 print(f'{district_pair} not connected')
                 continue
-            else:
-                print(f'{pair} connected')
+#             else:
+#                 print(f'{pair} connected')
             P = district_pops.copy()
             p0 = P.pop(pair[0])
             p1 = P.pop(pair[1])
@@ -135,9 +135,9 @@ where distance < 1.05 * min_distance
                         if pop_imbalance > self.g.pop_imbalance_tol:
                             T.add_edge(*e)
                         else:
-                            print(f'found split with pop_imbalance={pop_imbalance.round(1)}')
+#                             print(f'found split with pop_imbalance={pop_imbalance.round(1)}')
                             recom_found = True
-                            comp_new = get_components(T)
+                            comp_new = self.get_components(T)
                             for n, d in zip(comp_new, pair):
                                 N.loc[n, 'new'] = d
                             i = N.groupby([self.district, 'new'])['aland'].sum().idxmax()
