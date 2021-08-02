@@ -1,6 +1,6 @@
 @dataclasses.dataclass
-class Combined(Variable):
-    name: str = 'combined'
+class Edges(Variable):
+    name: str = 'edges'
 
     def __post_init__(self):
         self.yr = self.g.shapes_yr
@@ -9,28 +9,16 @@ class Combined(Variable):
 
 
     def get(self):
-        self.A = self.g.assignments
-        self.A.cols = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd', 'cd', 'sldu', 'sldl']
-        self.S = self.g.shapes
-        self.S.cols = ['aland', 'geography']
-        self.C = self.g.census
-        self.C.cols = ['total']
-        self.V = self.g.votes_all
-        E = get_cols(self.V.tbl)
-        self.V.cols = [f'{e}_all' for e in E]
-        self.H = self.g.votes_hl
-        self.H.cols = [f'{e}_hl' for e in E]
-        
         exists = super().get()
         if not exists['tbl']:
-            if not exists['raw']:
-                print(f'creating raw table', end=concat_str)
-                self.process_raw()
             print(f'creating table', end=concat_str)
             self.process()
 
 
-    def process_raw(self):
+    def process(self):
+        
+        
+        
         A_sels = [f'A.{c}' for c in self.A.cols]
         S_sels = [f'S.{c}' for c in self.S.cols]
         C_sels = [f'coalesce(C.{c}, 0) as {c}' for c in self.C.cols]

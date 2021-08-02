@@ -56,5 +56,7 @@ select
     st_geogfrom(geometry) as geography
 from
     {self.raw}
+order by
+    geoid
 """
         load_table(self.tbl, query=query, preview_rows=0)

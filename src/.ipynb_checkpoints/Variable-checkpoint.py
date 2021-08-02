@@ -52,8 +52,8 @@ class Variable(Base):
         exists['tbl'] = check_table(self.tbl)
         if exists['tbl']:
             print(f'{self.level} table exists', end=concat_str)
-        
-        exists['raw'] = check_table(self.raw)
-        if exists['raw']:
-            print(f'raw table exists', end=concat_str)
+        else:
+            exists['raw'] = check_table(self.raw)
+            if exists['raw']:
+                print(f'raw table exists', end=concat_str)
         return exists

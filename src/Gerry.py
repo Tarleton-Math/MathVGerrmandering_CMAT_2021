@@ -24,64 +24,72 @@ class Gerry(Base):
 
 
     def get_data(self):
-        for Property in [Crosswalks, Assignments, Shapes, Census, Elections]:
-            self[Property.name] = Property(g=self)
-        for grp in Groups:
-            self[f'votes_{grp}'] = Votes(g=self, group=grp)
-        self['combined'] = Combined(g=self)
+        self.crosswalks  = Crosswalks(g=self)
+        self.assignments = Assignments(g=self)
+        self.shapes      = Shapes(g=self)
+        self.census      = Census(g=self)
+        self.elections   = Elections(g=self)
+        self.votes_all   = Votes(g=self, group='all')
+        self.votes_hl    = Votes(g=self, group='hl')
+        self.combined    = Combined(g=self)
 
-
-
-
-    def get_nodes(self, tbl):
-        variable, abbr, yr, level, district = self.table_sep(tbl)
-        query = f"""
-select
-    A.*,
-    B.cd,
-    B.sldu,
-    B.sldl,
-    B.pop_total
-from
-    {self.table_id('shapes', self.shapes_yr, level)} as A
-inner join (
-    select
-        {level},
-        min(cd) as cd,
-        min(sldu) as sldu,
-        min(sldl) as sldl,
-        sum(total) as pop_total
-    from
-        {self.table_id('census', self.census_yr)} as A
-    group by
-        1
-    ) as B
-on
-    A.{level} = B.{level}
-"""
-        load_table(tbl, query=query, preview_rows=0)
-
-
-    def get_edges(self, tbl):
-        variable, abbr, yr, level, district = self.table_sep(tbl)
+        
+        self.nodes = read_tbl(self.combined.tbl, cols=['geoid', 'total', self.district])
+        
+        
+    def get_edges(self):
         query = f"""
 select
     *
 from (
     select
-        x.{level} as {level}_x,
-        y.{level} as {level}_y,        
+        x.geoid as geoid_x,
+        y.geoid as geoid_y,        
         st_distance(x.point, y.point) as distance,
         st_length(st_intersection(x.geography, y.geography)) as shared_perim
     from
-        {self.table_id('shapes')} as x,
-        {self.table_id('shapes')} as y
+        {self.combined.tbl} as x,
+        {self.combined.tbl} as y
     where
-        x.{level} < y.{level} and st_intersects(x.geography, y.geography)
+        x.geoid < y.geoid and st_intersects(x.geography, y.geography)
     )
-where shared_perim > 0.1
+where
+    shared_perim > 0.1
+order by
+    geoid_x, geoid_y
 """
         load_table(tbl, query=query, preview_rows=0)
+
+        
+#     def get_nodes(self, tbl):
+#         variable, abbr, yr, level, district = self.table_sep(tbl)
+#         query = f"""
+# select
+#     A.*,
+#     B.cd,
+#     B.sldu,
+#     B.sldl,
+#     B.pop_total
+# from
+#     {self.table_id('shapes', self.shapes_yr, level)} as A
+# inner join (
+#     select
+#         {level},
+#         min(cd) as cd,
+#         min(sldu) as sldu,
+#         min(sldl) as sldl,
+#         sum(total) as pop_total
+#     from
+#         {self.table_id('census', self.census_yr)} as A
+#     group by
+#         1
+#     ) as B
+# on
+#     A.{level} = B.{level}
+# """
+#         load_table(tbl, query=query, preview_rows=0)
+
+
 
 
 #######################################################################

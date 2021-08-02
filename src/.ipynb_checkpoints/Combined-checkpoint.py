@@ -8,7 +8,7 @@ class Combined(Variable):
         super().__post_init__()
 
 
-    def get(self, agg_tbl=None, agg_col=None):
+    def get(self):
         self.A = self.g.assignments
         self.A.cols = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd', 'cd', 'sldu', 'sldl']
         self.S = self.g.shapes

@@ -95,7 +95,7 @@ class Elections(Variable):
 ######## Assumes uniform voting behaviors across cntyvtd and between spanish_surname/general population ########
 ######## Obviously this is a crude approximation, but I don't see a better method ########
 ######## to do apportionment with the available data ########
-
+        sep = ' or\n        '
         query = f"""
 select
     *,
