@@ -75,7 +75,19 @@ def extract_file(zipfile, fn, **kwargs):
 #     return lower(pd.read_csv(file, dtype=str, **kwargs))
 
 def run_query(query):
-    return bqclient.query(query).result().to_dataframe()
+    res = bqclient.query(query).result()
+    try:
+        return res.to_dataframe()
+    except:
+        return True
+
+def delete_table(tbl):
+    query = f"drop table {tbl}"
+    try:
+        run_query(query)
+    except:
+        print(f'{tbl} not found', end=concat_str)
+        pass
 
 def read_table(tbl, rows=99999999999, start=0, cols='*'):
     query = f'select {", ".join(cols)} from {tbl} limit {rows}'
@@ -83,8 +95,6 @@ def read_table(tbl, rows=99999999999, start=0, cols='*'):
         query += f' offset {start}'
     return run_query(query)
 
-def delete_table(tbl):
-    bqclient.delete_table(tbl, not_found_ok=True)
     
 def check_table(tbl):
     try:

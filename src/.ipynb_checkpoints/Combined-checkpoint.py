@@ -62,8 +62,6 @@ on
     A.geoid = H.geoid
 """
         load_table(self.raw, query=query, preview_rows=0)
-
-
         
         
         
@@ -147,12 +145,12 @@ on
 
 ######## agg shapes, census, and votes then join with agg assignments above ########
         cols_data = self.C.cols + self.V.cols + self.H.cols
-        sels_data = [f'sum({c}) as {c}' for c in cols]
+        sels_data = [f'sum({c}) as {c}' for c in cols_data]
         
         query_data = f"""
 select
     geoid_new as geoid,
-    {join_str(1).join(data_sels)},
+    {join_str(1).join(sels_data)},
 from
     {temp}
 group by
@@ -163,16 +161,16 @@ group by
 
 
         if centroid:
-            centroid_sel = "st_centroid(geography) as point,"
+            sel_centroid = "st_centroid(geography) as point,"
         else:
-            centroid_sel = ""
+            sel_centroid = ""
         query_shapes = f"""
 select
     *,
     aland,
     perim,
     case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
-    {centroid_sel}
+    {sel_centroid}
     geography
 from (
     select
