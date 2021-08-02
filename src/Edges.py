@@ -14,7 +14,6 @@ class Edges(Variable):
             if not exists['tbl']:
                 print(f'creating table', end=concat_str)
                 self.process()
-            print(f'reading table', end=concat_str)
             self.df = read_table(self.tbl)
 
 

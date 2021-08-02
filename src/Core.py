@@ -18,6 +18,10 @@ bqclient   = bigquery.Client(credentials=cred, project=proj)
 root_path  = pathlib.Path(root_path)
 data_path  = root_path / 'redistricting_data'
 bq_dataset = proj_id   +'.redistricting_data'
+try:
+    rng = np.random.RandomState(seed)
+except:
+    rng = np.random.RandomState(42)
 
 Levels = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd']
 Districts = ['cd', 'sldu', 'sldl']

@@ -6,13 +6,14 @@ class Gerry(Base):
     shapes_yr         : int = 2020
     census_yr         : int = 2010
     district          : str = 'cd'
-    refresh_tbl : typing.Tuple = ()
-    refresh_all : typing.Tuple = ()
+    refresh_tbl       : typing.Tuple = ()
+    refresh_all       : typing.Tuple = ()
     election_filters  : typing.Tuple = (
         "office='USSen' and race='general'",
         "office='President' and race='general'",
         "office like 'USRep%' and race='general'")
     max_pop_imbalance : float = 10.0
+    node_attrs        : typing.Tuple = ('geoid', 'total', 'aland', 'perim', 'polsby_popper')
     
     def __post_init__(self):
         check_level(self.level)
