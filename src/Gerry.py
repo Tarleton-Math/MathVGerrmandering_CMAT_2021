@@ -37,93 +37,14 @@ class Gerry(Base):
         self.graph       = Graph(g=self)
 
 
-#######################################################################
-####################### Make graph and run MCMC #######################
-#######################################################################
-            
-#     def edges_to_graph(self, edges):
-#         edge_attr = ['distance', 'shared_perim']
-#         return nx.from_pandas_edgelist(edges, source=f'{self.level}_x', target=f'{self.level}_y', edge_attr=edge_attr)
-
-
-#     def get_graph(self):
-#         variable, yr, level, district = 'graph', self.shapes_yr, self.level, self.district
-#         file = self.file_id(variable, yr, level, district, suffix='gpickle')
-#         if variable in self.overwrite:
-#             if hasattr(self, variable):
-#                 delattr(self, variable)
-#             if file.is_file():
-#                 file.unlink()
-        
-#         try:
-#             self.nodes
-#         except:
-#             self.nodes = read_table(self.table_id('nodes', yr, self.level), cols=[level, 'cd', 'sldu', 'sldl', 'pop_total', 'aland', 'perim'])
-#         self.nodes.set_index(level, inplace=True)
-
-#         print(f"Get {variable} {self.name} {yr} {level} {self.district}".ljust(44, ' '), end=concat_str)
-#         try:
-#             self.graph
-#             print(f'already defined', end=concat_str)
-#         except:
-#             try:
-#                 self.graph = nx.read_gpickle(file)
-#                 print(f'gpickle file exists', end=concat_str)
-#             except:
-#                 print(f'making graph', end=concat_str)
-#                 try:
-#                     self.edges
-#                 except:
-#                     self.edges = read_table(self.table_id('edges', yr, self.level))
-#                 self.graph = self.edges_to_graph(self.edges)
-#                 print(f'connecting districts', end=concat_str)
-#                 tbl_shapes = self.table_id('shapes', yr, self.level)
-#                 for dist, nodes in self.nodes.groupby(self.district):
-#                     while True:
-#                         H = self.graph.subgraph(nodes.index)
-#                         components = sorted([list(c) for c in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
-#                         print(len(components))
-#                         print(f'\n{self.name} {level} {yr} {self.district.upper()} district {str(dist).rjust(3, " ")} has {str(len(components)).rjust(3, " ")} connected components with {[len(c) for c in components]} nodes ... adding edges to connect', end=concat_str)
-#                         if len(components) == 1:
-#                             break
-#                         c = ["', '".join(components[i]) for i in range(2)]
-#                         query = f"""
-# select
-#     {level}_x,
-#     {level}_y,
-#     distance,
-#     0.0 as shared_perim
-# from (
-#     select
-#         *,
-#         min(distance) over () as m
-#     from (
-#         select
-#             A.{level} as {level}_x,
-#             B.{level} as {level}_y,
-#             st_distance(A.point, B.point) as distance
-#         from
-#             {tbl_shapes} as A,
-#             {tbl_shapes} as B
-#         where
-#             A.{level} in ('{c[0]}') and B.{level} in ('{c[1]}')
-#         )
-#     )
-# where distance < 1.05 * m
-# """
-#                         new_edges = bqclient.query(query).result().to_dataframe()
-#                         self.graph.update(self.edges_to_graph(new_edges))
-#                         print(f'done', end='', flush=True)
-#                 nx.set_node_attributes(self.graph, self.nodes.to_dict('index'))
-#                 file.parent.mkdir(parents=True, exist_ok=True)
-#                 nx.write_gpickle(self.graph, file)
-#         print(f'success \n-----------------------------------------------------------------------------------')
-
-
     def recomb_step(self):
         recom_found = False
-        min_imbalance = 100
-        for district_pair in rng.permutation([(a,b) for a in self.districts for b in self.districts if a < b]).tolist():
+        best_imbalance = 100
+        district_pops = self.nodes.groupby(self.district)['pop'].sum().to_dict()
+        D = district_pops.keys()
+        P = rng.permutation([(a,b) for a in D for b in D if a < b]).tolist()
+        
+        for district_pair in rng.permutation(P):#.tolist():
             N = self.nodes.query(f'district in {district_pair}').copy()
             H = self.graph.subgraph(N.index)
             if not nx.is_connected(H):
@@ -154,7 +75,7 @@ class Gerry(Base):
                             print(f'I unsuccessfully tried {i} edge cuts for tree {h} - trying a new tree')
                             break
                         elif i % 100 == 0:
-                            print(i, e, deg, f'{min_imbalance:.2f}%')
+                            print(i, e, deg, f'{best_imbalance:.2f}%')
                         T.remove_edge(*e)
                         comp = nx.connected_components(T)
                         next(comp)
@@ -163,7 +84,7 @@ class Gerry(Base):
                         if t < s:
                             s, t = t, s
                         pop_imbalance = (max(t, pop_max) - min(s, pop_min)) / self.pop_ideal * 100
-                        min_imbalance = min(min_imbalance, pop_imbalance)
+                        best_imbalance = min(best_imbalance, pop_imbalance)
     #                     print(h, s, t, pop_imbalance)
                         if pop_imbalance < self.pop_tolerance:
                             print(f'found split with pop_imbalance={pop_imbalance}')

@@ -40,7 +40,7 @@ class Graph(Variable):
                 
     def process(self):
         self.graph = self.edges_to_graph(self.edges)
-        nx.set_node_attributes(self.graph, self.nodes.to_dict('index'))
+        nx.set_node_attributes(self.graph, self.nodes[['pop']].to_dict('index'))
         
         print(f'connecting districts', end=concat_str+'\n')
         for D, N in self.nodes.groupby(self.district):
@@ -83,3 +83,66 @@ where distance < 1.05 * min_distance
                     new_edges = run_query(query)
                     self.graph.update(self.edges_to_graph(new_edges))
                 print('done', flush=True)
+                
+                
+    def recomb(self):
+        recom_found = False
+        best_imbalance = 100
+        district_pops = self.nodes.groupby(self.district)['pop'].sum()
+        self.pop_ideal = district_pops.mean()
+        D = district_pops.index
+        R = rng.permutation([(a,b) for a in D for b in D if a < b]).tolist()
+        for pair in R:
+            N = self.nodes.query(f'{self.district} in {pair}').copy()
+            H = self.graph.subgraph(N.index)
+            if not nx.is_connected(H):
+#                 print(f'{district_pair} not connected')
+                continue
+            else:
+                print(f'{district_pair} connected')
+            P = district_pops.copy()
+            p0 = P.pop(pair[0])
+            p1 = P.pop(pair[1])
+            q = p0 + p1
+            P_min, P_max = P.min(), P.max()
+            trees = []
+            for i in range(100):
+                w = {e: rng.uniform() for e in H.edges}
+                nx.set_edge_attributes(H, w, "weight")
+                T = nx.minimum_spanning_tree(H)
+                h = hash(tuple(sorted(T.edges)))
+                if h not in trees:
+                    trees.append(h)
+                    B = nx.edge_betweenness_centrality(T)
+                    B = sorted(B.items(), key=lambda x:x[1], reverse=True)
+                    max_tries = max(100, int(0.02 * len(B)))
+                    for e, cent in B[:max_tries]:
+                        T.remove_edge(*e)
+                        comp = nx.connected_components(T)
+                        next(comp)
+                        s = sum(T.nodes[n]['pop'] for n in next(comp))
+                        t = q - s
+                        if t < s:
+                            s, t = t, s
+                        pop_imbalance = (max(t, P_max) - min(s, P_min)) / self.pop_ideal * 100
+                        best_imbalance = min(best_imbalance, pop_imbalance)
+                        if pop_imbalance > self.g.max_pop_imbalance:
+                            T.add_edge(*e)
+                        else:
+                            print(f'found split with pop_imbalance={pop_imbalance.round(1)}')
+                            recom_found = True
+                            comp_new = get_components(T)
+                            for n, d in zip(comp_new, pair):
+                                N.loc[n, 'new'] = d
+                            i = N.groupby([self.district, 'new'])['aland'].sum().idxmax()
+                            if i[0] != i[1]:
+                                comp_new[0], comp_new[1] = comp_new[1], comp_new[0]
+                            for n, d in zip(comp_new, pair):
+                                self.nodes.loc[n, self.district] = d
+                            break
+                if recom_found:
+                    break
+            if recom_found:
+                break
+#         assert recom_found, "No suitable recomb step found"
+        return recom_found

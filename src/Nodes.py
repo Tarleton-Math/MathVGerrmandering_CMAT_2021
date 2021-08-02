@@ -13,4 +13,4 @@ class Nodes(Variable):
         exists = super().get()
         if not exists['df']:
             self.df = (read_table(self.g.combined.tbl, cols=self.attrs)
-                       .set_index('geoid').rename(columns={'total':'pop_total'}))
+                       .rename(columns={'total':'pop'}).set_index('geoid'))
