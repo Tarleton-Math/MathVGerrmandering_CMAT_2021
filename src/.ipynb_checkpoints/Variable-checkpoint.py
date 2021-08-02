@@ -8,11 +8,15 @@ class Variable(Base):
         self.state = self.g.state
         a = f'{self.name}/{self.state.abbr}'
         self.path = data_path / a
-        b = f'{a}_{self.yr}'.replace('/', '_')
-        self.zip = self.path / f'{b}.zip'
-        self.pq  = self.path / f'{b}.parquet'
-        self.raw = f'{bq_dataset}.{b}_raw'
-        self.tbl = f'{bq_dataset}.{b}_{self.level}'
+        a = a.replace('/', '_')
+        b = f'{a}_{self.yr}'
+        c = f'{b}_{self.level}'
+        d = f'{c}_{self.g.district}'
+        self.zip     = self.path / f'{b}.zip'
+        self.pq      = self.path / f'{b}.parquet'
+        self.raw    = f'{bq_dataset}.{b}_raw'
+        self.tbl    = f'{bq_dataset}.{c}'
+        self.gpickle = self.path / f'{d}.gpickle'
 
         if self.name in self.g.refresh_tbl:
             delete_table(self.tbl)
@@ -42,7 +46,7 @@ class Variable(Base):
 
 
     def get(self):
-        print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level}".ljust(44, ' '), end=concat_str)
+        print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level}".ljust(32, ' '), end=concat_str)
         exists = dict()
         
         exists['df'] = hasattr(self, 'df')

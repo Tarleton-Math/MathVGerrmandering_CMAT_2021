@@ -22,7 +22,6 @@ class Gerry(Base):
         self.state = states[states['abbr']==self.abbr].iloc[0]
         self.__dict__.update(self.state)
 
-
     def get_data(self):
         self.crosswalks  = Crosswalks(g=self)
         self.assignments = Assignments(g=self)
@@ -32,146 +31,92 @@ class Gerry(Base):
         self.votes_all   = Votes(g=self, group='all')
         self.votes_hl    = Votes(g=self, group='hl')
         self.combined    = Combined(g=self)
-
-        self.nodes = read_tbl(self.combined.tbl, cols=['geoid', 'total', self.district])
-        
-        
-    def get_edges(self):
-        query = f"""
-select
-    *
-from (
-    select
-        x.geoid as geoid_x,
-        y.geoid as geoid_y,        
-        st_distance(x.point, y.point) as distance,
-        st_length(st_intersection(x.geography, y.geography)) as shared_perim
-    from
-        {self.combined.tbl} as x,
-        {self.combined.tbl} as y
-    where
-        x.geoid < y.geoid and st_intersects(x.geography, y.geography)
-    )
-where
-    shared_perim > 0.1
-order by
-    geoid_x, geoid_y
-"""
-        load_table(tbl, query=query, preview_rows=0)
-
-        
-#     def get_nodes(self, tbl):
-#         variable, abbr, yr, level, district = self.table_sep(tbl)
-#         query = f"""
-# select
-#     A.*,
-#     B.cd,
-#     B.sldu,
-#     B.sldl,
-#     B.pop_total
-# from
-#     {self.table_id('shapes', self.shapes_yr, level)} as A
-# inner join (
-#     select
-#         {level},
-#         min(cd) as cd,
-#         min(sldu) as sldu,
-#         min(sldl) as sldl,
-#         sum(total) as pop_total
-#     from
-#         {self.table_id('census', self.census_yr)} as A
-#     group by
-#         1
-#     ) as B
-# on
-#     A.{level} = B.{level}
-# """
-#         load_table(tbl, query=query, preview_rows=0)
-
-
+        self.edges       = Edges(g=self)
+        self.nodes       = Nodes(g=self)
+        self.graph       = Graph(g=self)
 
 
 #######################################################################
 ####################### Make graph and run MCMC #######################
 #######################################################################
             
-    def edges_to_graph(self, edges):
-        edge_attr = ['distance', 'shared_perim']
-        return nx.from_pandas_edgelist(edges, source=f'{self.level}_x', target=f'{self.level}_y', edge_attr=edge_attr)
+#     def edges_to_graph(self, edges):
+#         edge_attr = ['distance', 'shared_perim']
+#         return nx.from_pandas_edgelist(edges, source=f'{self.level}_x', target=f'{self.level}_y', edge_attr=edge_attr)
 
 
-    def get_graph(self):
-        variable, yr, level, district = 'graph', self.shapes_yr, self.level, self.district
-        file = self.file_id(variable, yr, level, district, suffix='gpickle')
-        if variable in self.overwrite:
-            if hasattr(self, variable):
-                delattr(self, variable)
-            if file.is_file():
-                file.unlink()
+#     def get_graph(self):
+#         variable, yr, level, district = 'graph', self.shapes_yr, self.level, self.district
+#         file = self.file_id(variable, yr, level, district, suffix='gpickle')
+#         if variable in self.overwrite:
+#             if hasattr(self, variable):
+#                 delattr(self, variable)
+#             if file.is_file():
+#                 file.unlink()
         
-        try:
-            self.nodes
-        except:
-            self.nodes = read_table(self.table_id('nodes', yr, self.level), cols=[level, 'cd', 'sldu', 'sldl', 'pop_total', 'aland', 'perim'])
-        self.nodes.set_index(level, inplace=True)
+#         try:
+#             self.nodes
+#         except:
+#             self.nodes = read_table(self.table_id('nodes', yr, self.level), cols=[level, 'cd', 'sldu', 'sldl', 'pop_total', 'aland', 'perim'])
+#         self.nodes.set_index(level, inplace=True)
 
-        print(f"Get {variable} {self.name} {yr} {level} {self.district}".ljust(44, ' '), end=concat_str)
-        try:
-            self.graph
-            print(f'already defined', end=concat_str)
-        except:
-            try:
-                self.graph = nx.read_gpickle(file)
-                print(f'gpickle file exists', end=concat_str)
-            except:
-                print(f'making graph', end=concat_str)
-                try:
-                    self.edges
-                except:
-                    self.edges = read_table(self.table_id('edges', yr, self.level))
-                self.graph = self.edges_to_graph(self.edges)
-                print(f'connecting districts', end=concat_str)
-                tbl_shapes = self.table_id('shapes', yr, self.level)
-                for dist, nodes in self.nodes.groupby(self.district):
-                    while True:
-                        H = self.graph.subgraph(nodes.index)
-                        components = sorted([list(c) for c in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
-                        print(len(components))
-                        print(f'\n{self.name} {level} {yr} {self.district.upper()} district {str(dist).rjust(3, " ")} has {str(len(components)).rjust(3, " ")} connected components with {[len(c) for c in components]} nodes ... adding edges to connect', end=concat_str)
-                        if len(components) == 1:
-                            break
-                        c = ["', '".join(components[i]) for i in range(2)]
-                        query = f"""
-select
-    {level}_x,
-    {level}_y,
-    distance,
-    0.0 as shared_perim
-from (
-    select
-        *,
-        min(distance) over () as m
-    from (
-        select
-            A.{level} as {level}_x,
-            B.{level} as {level}_y,
-            st_distance(A.point, B.point) as distance
-        from
-            {tbl_shapes} as A,
-            {tbl_shapes} as B
-        where
-            A.{level} in ('{c[0]}') and B.{level} in ('{c[1]}')
-        )
-    )
-where distance < 1.05 * m
-"""
-                        new_edges = bqclient.query(query).result().to_dataframe()
-                        self.graph.update(self.edges_to_graph(new_edges))
-                        print(f'done', end='', flush=True)
-                nx.set_node_attributes(self.graph, self.nodes.to_dict('index'))
-                file.parent.mkdir(parents=True, exist_ok=True)
-                nx.write_gpickle(self.graph, file)
-        print(f'success \n-----------------------------------------------------------------------------------')
+#         print(f"Get {variable} {self.name} {yr} {level} {self.district}".ljust(44, ' '), end=concat_str)
+#         try:
+#             self.graph
+#             print(f'already defined', end=concat_str)
+#         except:
+#             try:
+#                 self.graph = nx.read_gpickle(file)
+#                 print(f'gpickle file exists', end=concat_str)
+#             except:
+#                 print(f'making graph', end=concat_str)
+#                 try:
+#                     self.edges
+#                 except:
+#                     self.edges = read_table(self.table_id('edges', yr, self.level))
+#                 self.graph = self.edges_to_graph(self.edges)
+#                 print(f'connecting districts', end=concat_str)
+#                 tbl_shapes = self.table_id('shapes', yr, self.level)
+#                 for dist, nodes in self.nodes.groupby(self.district):
+#                     while True:
+#                         H = self.graph.subgraph(nodes.index)
+#                         components = sorted([list(c) for c in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
+#                         print(len(components))
+#                         print(f'\n{self.name} {level} {yr} {self.district.upper()} district {str(dist).rjust(3, " ")} has {str(len(components)).rjust(3, " ")} connected components with {[len(c) for c in components]} nodes ... adding edges to connect', end=concat_str)
+#                         if len(components) == 1:
+#                             break
+#                         c = ["', '".join(components[i]) for i in range(2)]
+#                         query = f"""
+# select
+#     {level}_x,
+#     {level}_y,
+#     distance,
+#     0.0 as shared_perim
+# from (
+#     select
+#         *,
+#         min(distance) over () as m
+#     from (
+#         select
+#             A.{level} as {level}_x,
+#             B.{level} as {level}_y,
+#             st_distance(A.point, B.point) as distance
+#         from
+#             {tbl_shapes} as A,
+#             {tbl_shapes} as B
+#         where
+#             A.{level} in ('{c[0]}') and B.{level} in ('{c[1]}')
+#         )
+#     )
+# where distance < 1.05 * m
+# """
+#                         new_edges = bqclient.query(query).result().to_dataframe()
+#                         self.graph.update(self.edges_to_graph(new_edges))
+#                         print(f'done', end='', flush=True)
+#                 nx.set_node_attributes(self.graph, self.nodes.to_dict('index'))
+#                 file.parent.mkdir(parents=True, exist_ok=True)
+#                 nx.write_gpickle(self.graph, file)
+#         print(f'success \n-----------------------------------------------------------------------------------')
 
 
     def recomb_step(self):
