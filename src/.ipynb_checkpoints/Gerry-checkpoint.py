@@ -24,7 +24,7 @@ class Gerry(Base):
         self.__dict__.update(self.state)
 
     def get_data(self):
-        self.tbl = f'{bq_dataset}.plans_{self.state.abbr}_{self.census_yr}_{self.level}_{self.district}'
+        self.tbl = f'{bq_dataset}.plans_{self.state.abbr}_{self.census_yr}_{self.level}_{self.district_type}'
         self.crosswalks  = Crosswalks(g=self)
         self.assignments = Assignments(g=self)
         self.shapes      = Shapes(g=self)

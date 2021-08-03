@@ -12,7 +12,7 @@ class Variable(Base):
         a = a.replace('/', '_')
         b = f'{a}_{self.yr}'
         c = f'{b}_{self.level}'
-        d = f'{c}_{self.g.district}'
+        d = f'{c}_{self.g.district_type}'
         self.zip     = self.path / f'{b}.zip'
         self.pq      = self.path / f'{b}.parquet'
         self.raw    = f'{bq_dataset}.{b}_raw'
