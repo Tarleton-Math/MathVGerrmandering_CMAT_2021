@@ -6,6 +6,7 @@ class Gerry(Base):
     shapes_yr         : int = 2020
     census_yr         : int = 2010
     district_type     : str = 'cd'
+    agg_shapes        : bool = True
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
     election_filters  : typing.Tuple = (
@@ -54,5 +55,5 @@ class Gerry(Base):
         for col in self.plans.columns:
             out_tbl = self.tbl + f"_{col.split('_')[-1]}"
             print(f'Aggregating {self.combined.raw} by {col} on table {self.tbl}')
-            self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=out_tbl, agg_shapes=False)
+            self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=out_tbl, agg_shapes=self.agg_shapes)
             print('done')
