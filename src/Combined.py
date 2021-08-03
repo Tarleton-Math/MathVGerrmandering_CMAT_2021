@@ -63,9 +63,11 @@ on
 """
         load_table(self.raw, query=query, preview_rows=0)
         
+    def process(self):
+        bqclient.copy_table(self.raw, self.tbl).result()
+        self.agg()
         
-        
-    def process(self, agg_tbl=None, agg_col=None, out_tbl=None, agg_shapes=True, centroid=True):
+    def agg(self, agg_tbl=None, agg_col=None, out_tbl=None, agg_shapes=True, centroid=True):
         if agg_tbl is None:
             agg_tbl = self.g.assignments.tbl
         if agg_col is None:
@@ -73,14 +75,15 @@ on
         if out_tbl is None:
             out_tbl = self.tbl
 
-######## join agg_tbl to raw ########
-        temp = self.tbl + '_temp'
+######## join tbl and agg_tbl ########
+        print(f'joining {self.tbl} and {agg_tbl}', end=concat_str)
+        temp = out_tbl + '_temp'
         query = f"""
 select
     B.{agg_col} as geoid_new,
     A.*
 from
-    {self.raw} as A
+    {self.tbl} as A
 left join
     {agg_tbl} as B
 on
@@ -90,6 +93,7 @@ on
 
 ######## agg assignments by most frequent value in each column within each agg region ########
 ######## must compute do this one column at a time, then join ########
+        print(f'aggregating assignments ', end=concat_str)
         cols_assign = self.A.cols
         tbls = list()
         c = 64
@@ -141,44 +145,60 @@ on
 ######## run join query ########
         temp_assign = temp + '_assign'
         load_table(temp_assign, query=query_join, preview_rows=0)
-            
 
-######## agg shapes, census, and votes then join with agg assignments above ########
-        cols_data = self.C.cols + self.V.cols + self.H.cols
-        sels_data = [f'sum({c}) as {c}' for c in cols_data]
         
-        query_data = f"""
+        
+######## agg shapes, census, and votes then join with agg assignments above ########
+        cols = self.C.cols + self.V.cols + self.H.cols
+        sels = [f'sum({c}) as {c}' for c in cols]
+        
+        if not agg_shapes:
+            print(f'aggregating census and votes', end=concat_str)
+            query = f"""
 select
-    geoid_new as geoid,
-    {join_str(1).join(sels_data)},
+    A.*,
+    {join_str(1).join(cols)}
 from
-    {temp}
-group by
-    1
+    {temp_assign} as A
+left join (
+    select
+        geoid_new as geoid,
+        {join_str(1).join(sels)}
+    from
+        {temp}
+    group by
+        1
+    ) as B
+on
+    A.geoid = B.geoid
+order by
+    geoid
 """
-        temp_data = temp + '_data'
-        load_table(temp_data, query=query_data, preview_rows=0)
-
-
-        if centroid:
-            sel_centroid = "st_centroid(geography) as point,"
         else:
-            sel_centroid = ""
-        query_shapes = f"""
+            print(f'aggregating census, votes and shapes', end=concat_str)
+            if centroid:
+                sel_centroid = "st_centroid(geography) as point,"
+            else:
+                sel_centroid = ""
+            query = f"""
 select
-    *,
+    A.*,
     aland,
     perim,
     case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
+    {join_str(1).join(cols)},
     {sel_centroid}
     geography
-from (
+from
+    {temp_assign} as A
+left join (
     select
         *,
         st_perimeter(geography) as perim
     from (
         select
             geoid_new as geoid,
+            {join_str(1).join(sels)},
             sum(aland) as aland,
             st_union_agg(geography) as geography
         from
@@ -186,52 +206,115 @@ from (
         group by
             1
         )
-    )
-"""
-        temp_shapes = temp + '_shapes'
-        if agg_shapes:
-            load_table(temp_shapes, query=query_shapes, preview_rows=0)
-            query = f"""
-select
-    A.*,
-    aland,
-    perim,
-    polsby_popper,
-    {join_str(1).join(cols_data)},
-    point,
-    geography
-from
-    {temp_assign} as A
-left join
-    {temp_data} as D
+    ) as B
 on
-    A.geoid = D.geoid
-left join
-    {temp_shape} as S
-on
-    A.geoid = S.geoid
-"""
-        else:
-            query = f"""
-select
-    A.*,
-    {join_str(1).join(cols_data)},
-from
-    {temp_assign} as A
-left join
-    {temp_data} as D
-on
-    A.geoid = D.geoid
+    A.geoid = B.geoid
+order by
+    geoid
 """
         load_table(out_tbl, query=query, preview_rows=0)
         
 ######## clean up ########
         delete_table(temp)
         delete_table(temp_assign)
-        delete_table(temp_data)
-        delete_table(temp_shapes)
         for t in tbls:
             delete_table(t)
+        
+        
+        
+        
+        
+        
+
+
+# ######## agg shapes, census, and votes then join with agg assignments above ########
+#         cols_data = self.C.cols + self.V.cols + self.H.cols
+#         sels_data = [f'sum({c}) as {c}' for c in cols_data]
+        
+#         query_data = f"""
+# select
+#     geoid_new as geoid,
+#     {join_str(1).join(sels_data)},
+# from
+#     {temp}
+# group by
+#     1
+# """
+#         temp_data = temp + '_data'
+#         load_table(temp_data, query=query_data, preview_rows=0)
+
+#         if centroid:
+#             sel_centroid = "st_centroid(geography) as point,"
+#         else:
+#             sel_centroid = ""
+#         query_shapes = f"""
+# select
+#     geoid,
+#     aland,
+#     perim,
+#     case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
+#     {sel_centroid}
+#     geography
+# from (
+#     select
+#         *,
+#         st_perimeter(geography) as perim
+#     from (
+#         select
+#             geoid_new as geoid,
+#             sum(aland) as aland,
+#             st_union_agg(geography) as geography
+#         from
+#             {temp}
+#         group by
+#             1
+#         )
+#     )
+# """
+#         temp_shapes = temp + '_shapes'
+#         if agg_shapes:
+#             load_table(temp_shapes, query=query_shapes, preview_rows=0)
+#             query = f"""
+# select
+#     A.*,
+#     aland,
+#     perim,
+#     polsby_popper,
+#     {join_str(1).join(cols_data)},
+#     point,
+#     geography
+# from
+#     {temp_assign} as A
+# left join
+#     {temp_data} as D
+# on
+#     A.geoid = D.geoid
+# left join
+#     {temp_shape} as S
+# on
+#     A.geoid = S.geoid
+# """
+#         else:
+#             query = f"""
+# select
+#     A.*,
+#     {join_str(1).join(cols_data)},
+# from
+#     {temp_assign} as A
+# left join
+#     {temp_data} as D
+# on
+#     A.geoid = D.geoid
+# """
+#         load_table(out_tbl, query=query, preview_rows=0)
+        
+# ######## clean up ########
+#         delete_table(temp)
+#         delete_table(temp_assign)
+#         delete_table(temp_data)
+#         delete_table(temp_shapes)
+#         for t in tbls:
+#             delete_table(t)
         
         
         

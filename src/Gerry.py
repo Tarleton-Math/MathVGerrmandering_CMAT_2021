@@ -50,17 +50,17 @@ class Gerry(Base):
         self.get_data()
 
         d = len(str(steps))
-        f = lambda k: f"plan_{str(k).ljust(d, '0')}"
-        self.plans = [self.nodes.df[self.district].copy().rename(f(0))]
+        f = lambda k: self.nodes.df[self.district].copy().astype(str).rename(f"plan_{str(k).ljust(d, '0')}")
+        self.plans = [f(0)]
         for step in range(1,steps+1):
             if self.graph.recomb():
-                self.plans.append(self.nodes.df[self.district].copy().rename(f(step)))
+                self.plans.append(f(step))
         print('MCMC done')
         self.plans = pd.concat(self.plans, axis=1)
         load_table(tbl=self.tbl, df=self.plans.reset_index(), preview_rows=0)
 
         for col in self.plans.columns:
             out_tbl = self.tbl + f"_{col.split('_')[-1]}"
-            print(f'Aggregating {self.combined.tbl} by {col} on table {self.tbl}')
-            self.combined.process(agg_tbl=self.tbl, agg_col=col, out_tbl=out_tbl)
+            print(f'Aggregating {self.combined.raw} by {col} on table {self.tbl}')
+            self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=out_tbl)#, agg_shapes=False)
             print('done')

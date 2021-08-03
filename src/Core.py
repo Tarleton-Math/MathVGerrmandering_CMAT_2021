@@ -74,6 +74,13 @@ def extract_file(zipfile, fn, **kwargs):
     return lower_cols(pd.read_csv(file, dtype=str, **kwargs))
 #     return lower(pd.read_csv(file, dtype=str, **kwargs))
 
+def check_table(tbl):
+    try:
+        bqclient.get_table(tbl)
+        return True
+    except:
+        return False
+
 def run_query(query):
     res = bqclient.query(query).result()
     try:
@@ -86,7 +93,7 @@ def delete_table(tbl):
     try:
         run_query(query)
     except:
-        print(f'{tbl} not found', end=concat_str)
+#         print(f'{tbl} not found', end=concat_str)
         pass
 
 def read_table(tbl, rows=99999999999, start=0, cols='*'):
@@ -95,20 +102,11 @@ def read_table(tbl, rows=99999999999, start=0, cols='*'):
         query += f' offset {start}'
     return run_query(query)
 
-    
-def check_table(tbl):
-    try:
-        bqclient.get_table(tbl)
-        return True
-    except:
-        return False
+def head(tbl, rows=10):
+    return read_table(tbl, rows)
 
 def get_cols(tbl):
     return [s.name for s in bqclient.get_table(tbl).schema if s.name.lower() != 'geoid']
-        
-
-def head(tbl, rows=10):
-    return read_table(tbl, rows)
 
 def load_table(tbl, df=None, file=None, query=None, overwrite=True, preview_rows=0):
 #     print(f'loading BigQuery table {tbl}', end=concat_str)
