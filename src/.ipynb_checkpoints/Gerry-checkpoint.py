@@ -7,6 +7,7 @@ class Gerry(Base):
     census_yr         : int = 2010
     district_type     : str = 'cd'
     agg_shapes        : bool = True
+    agg_centroids     : bool = False
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
     election_filters  : typing.Tuple = (
@@ -65,9 +66,11 @@ class Gerry(Base):
         print('MCMC done')
         self.plans = pd.concat(self.plans, axis=1)
         load_table(tbl=self.tbl, df=self.plans.reset_index(), preview_rows=0)
-
+        self.agg_plans()
+        
+    def agg_plans(self):
         for col in self.plans.columns:
             out_tbl = self.tbl + f"_{col.split('_')[-1]}"
-            print(f'Aggregating {self.combined.raw} by {col} on table {self.tbl}')
-            self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=out_tbl, agg_shapes=self.agg_shapes)
+            print(f'Aggregating {self.combined.raw} by {col} on table {self.tbl}', end=concat_str)
+            self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=out_tbl, district_types=self.districts.name, agg_shapes=self.agg_shapes, agg_centroids=self.agg_centroids)
             print('done')

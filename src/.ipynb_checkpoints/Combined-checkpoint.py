@@ -10,7 +10,7 @@ class Combined(Variable):
 
     def get(self):
         self.A = self.g.assignments
-        self.A.cols = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd', 'cd', 'sldu', 'sldl']
+        self.A.cols = Levels + District_types
         self.S = self.g.shapes
         self.S.cols = ['aland', 'geography']
         self.C = self.g.census
@@ -63,18 +63,17 @@ on
     A.geoid = H.geoid
 """
         load_table(self.raw, query=query, preview_rows=0)
-        
+
+
     def process(self):
         bqclient.copy_table(self.raw, self.tbl).result()
-        self.agg()
-        
-    def agg(self, agg_tbl=None, agg_col=None, out_tbl=None, agg_shapes=True, centroid=True):
-        if agg_tbl is None:
-            agg_tbl = self.g.assignments.tbl
-        if agg_col is None:
-            agg_col = self.level
-        if out_tbl is None:
-            out_tbl = self.tbl
+        self.agg(agg_tbl=self.g.assignments.tbl, agg_col=self.level, out_tbl=self.tbl, district_types=District_types, agg_shapes=True, agg_centroids=True)
+
+
+    def agg(self, agg_tbl, agg_col, out_tbl, district_types=None, agg_shapes=True, agg_centroids=False):
+        if district_types is None:
+            district_types = self.g.district_type
+        district_types = listify(district_types)
 
 ######## join tbl and agg_tbl ########
         print(f'joining {self.tbl} and {agg_tbl}', end=concat_str)
@@ -94,11 +93,10 @@ on
 
 ######## agg assignments by most frequent value in each column within each agg region ########
 ######## must compute do this one column at a time, then join ########
-        print(f'aggregating assignments ', end=concat_str)
-        cols_assign = self.A.cols
+        print(f'aggregating {district_types}', end=concat_str)
         tbls = list()
         c = 64
-        for col in cols_assign:
+        for col in district_types:
             t = temp + f'_{col}'
             tbls.append(t)
             query_assign = f"""
@@ -130,7 +128,8 @@ where
             if len(tbls) <= 1:
                 query_join = f"""
 select
-    {join_str(1).join(['A.geoid'] + cols_assign)}
+    A.geoid,
+    {join_str(1).join(district_types)}
 from
     {t} as A
 """
@@ -147,14 +146,12 @@ on
         temp_assign = temp + '_assign'
         load_table(temp_assign, query=query_join, preview_rows=0)
 
-        
-        
 ######## agg shapes, census, and votes then join with agg assignments above ########
         cols = self.C.cols + self.V.cols + self.H.cols
         sels = [f'sum({c}) as {c}' for c in cols]
         
+        data = ['census', 'votes_all', 'votes_hl']
         if not agg_shapes:
-            print(f'aggregating census and votes', end=concat_str)
             query = f"""
 select
     A.*,
@@ -176,11 +173,12 @@ order by
     geoid
 """
         else:
-            print(f'aggregating census, votes and shapes', end=concat_str)
-            if centroid:
-                sel_centroid = "st_centroid(geography) as point,"
+            data += ['shapes']
+            if not agg_centroids:
+                sel_centroids = ""
             else:
-                sel_centroid = ""
+                data += ['centroid']
+                sel_centroids = "st_centroid(geography) as centroid,"
             query = f"""
 select
     A.*,
@@ -188,7 +186,7 @@ select
     perim,
     case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
     {join_str(1).join(cols)},
-    {sel_centroid}
+    {sel_centroids}
     geography
 from
     {temp_assign} as A
@@ -213,6 +211,7 @@ on
 order by
     geoid
 """
+        print(f'aggregating {data}', end=concat_str)
         load_table(out_tbl, query=query, preview_rows=0)
         
 ######## clean up ########
