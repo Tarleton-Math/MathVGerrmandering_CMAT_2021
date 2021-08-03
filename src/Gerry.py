@@ -5,7 +5,7 @@ class Gerry(Base):
     level             : str = 'tract'
     shapes_yr         : int = 2020
     census_yr         : int = 2010
-    district          : str = 'cd'
+    district_type     : str = 'cd'
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
     election_filters  : typing.Tuple = (
@@ -17,7 +17,7 @@ class Gerry(Base):
     
     def __post_init__(self):
         check_level(self.level)
-        check_district(self.district)
+        check_district_type(self.district_type)
         check_year(self.census_yr)
         check_year(self.shapes_yr)
         self.state = states[states['abbr']==self.abbr].iloc[0]
@@ -35,22 +35,14 @@ class Gerry(Base):
         self.combined    = Combined(g=self)
 #         self.edges       = Edges(g=self)
         self.nodes       = Nodes(g=self)
+        self.districts   = Districts(g=self)
         self.graph       = Graph(g=self)
-        self.pop_ideal = self.get_district_pops().mean()
-        
-    def get_district_pops(self):
-        return self.nodes.df.groupby(self.district)['pop'].sum()
-    
-#     def hash_plan(self)
-        
-#         h = hash(tuple(sorted(T.edges)))
-
 
     def MCMC(self, steps=10):
         self.get_data()
 
         d = len(str(steps))
-        f = lambda k: self.nodes.df[self.district].copy().astype(str).rename(f"plan_{str(k).ljust(d, '0')}")
+        f = lambda k: self.nodes.df[self.districts.name].copy().astype(str).rename(f"plan_{str(k).ljust(d, '0')}")
         self.plans = [f(0)]
         for step in range(1,steps+1):
             if self.graph.recomb():

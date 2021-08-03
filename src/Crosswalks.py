@@ -15,6 +15,7 @@ class Crosswalks(Variable):
             self.get_zip()
             print(f'creating table', end=concat_str)
             self.process()
+        return self
 
 
     def process(self):

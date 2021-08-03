@@ -15,6 +15,7 @@ class Edges(Variable):
                 print(f'creating table', end=concat_str)
                 self.process()
             self.df = read_table(self.tbl)
+        return self
 
 
     def process(self):

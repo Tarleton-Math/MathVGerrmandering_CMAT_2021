@@ -3,15 +3,14 @@ class Graph(Variable):
     name: str = 'graph'
 
     def __post_init__(self):
-        self.yr = self.g.shapes_yr
+        self.yr = self.g.census_yr
         self.level = self.g.level
-        self.district = self.g.district
         self.nodes = self.g.nodes.df
         super().__post_init__()
 
 
     def get(self):
-        print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level} {self.district}".ljust(32, ' '), end=concat_str)
+        print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level} {self.dt}".ljust(32, ' '), end=concat_str)
         try:
             self.graph
             print(f'graph exists', end=concat_str)
@@ -24,6 +23,7 @@ class Graph(Variable):
                 self.process()
                 self.gpickle.parent.mkdir(parents=True, exist_ok=True)
                 nx.write_gpickle(self.graph, self.gpickle)
+        return self
 
     
     def edges_to_graph(self, edges):
@@ -50,7 +50,7 @@ class Graph(Variable):
         nx.set_node_attributes(self.graph, self.nodes[['pop']].to_dict('index'))
         
         print(f'connecting districts', end=concat_str+'\n')
-        for D, N in self.nodes.groupby(self.district):
+        for D, N in self.nodes.groupby(self.dt):
             while True:
                 H = self.graph.subgraph(N.index)
                 comp = self.get_components(H)
@@ -93,24 +93,22 @@ where distance < 1.05 * min_distance
                 
                 
     def recomb(self):
-        district_pops = self.g.get_district_pops()
-        pop_imbalance_current = (district_pops.max() - district_pops.min()) / self.g.pop_ideal * 100
-        tol = max(self.g.pop_imbalance_tol, pop_imbalance_current)
-        print(f'Current population imbalance = {pop_imbalance_current:.2f}% ... setting population imbalance tolerance = {tol:.2f}%')
+        D = self.g.districts.get()
+        tol = max(D.pop_imbalance, self.pop_imbalance_tol)
+        print(f'Current population imbalance = {D.pop_imbalance:.2f}% ... setting population imbalance tolerance = {tol:.2f}%')
         
         best_imbalance = 100
         recom_found = False
-        D = district_pops.index
-        R = rng.permutation([(a,b) for a in D for b in D if a < b]).tolist()
+        R = rng.permutation([(a,b) for a in D.keys for b in D.keys if a < b]).tolist()
         for pair in R:
-            N = self.nodes.query(f'{self.district} in {pair}').copy()
+            N = self.nodes.query(f'{D.name} in {pair}').copy()
             H = self.graph.subgraph(N.index)
             if not nx.is_connected(H):
 #                 print(f'{district_pair} not connected')
                 continue
 #             else:
 #                 print(f'{pair} connected')
-            P = district_pops.copy()
+            P = D.pops.copy()
             p0 = P.pop(pair[0])
             p1 = P.pop(pair[1])
             q = p0 + p1
@@ -144,11 +142,11 @@ where distance < 1.05 * min_distance
                             comp_new = self.get_components(T)
                             for n, d in zip(comp_new, pair):
                                 N.loc[n, 'new'] = d
-                            i = N.groupby([self.district, 'new'])['aland'].sum().idxmax()
+                            i = N.groupby([D.name, 'new'])['aland'].sum().idxmax()
                             if i[0] != i[1]:
                                 comp_new[0], comp_new[1] = comp_new[1], comp_new[0]
                             for n, d in zip(comp_new, pair):
-                                self.nodes.loc[n, self.district] = d
+                                self.nodes.loc[n, D.name] = d
                             break
                 if recom_found:
                     break

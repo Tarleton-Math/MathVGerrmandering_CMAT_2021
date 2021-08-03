@@ -1,7 +1,7 @@
 @dataclasses.dataclass
 class Variable(Base):
     g     : typing.Any
-    name  : str
+    name  : str = 'variable'
     level : str = 'tabblock'
 
     def __post_init__(self):

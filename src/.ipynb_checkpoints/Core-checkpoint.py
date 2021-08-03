@@ -24,7 +24,7 @@ except:
     rng = np.random.RandomState(42)
 
 Levels = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd']
-Districts = ['cd', 'sldu', 'sldl']
+District_types = ['cd', 'sldu', 'sldl']
 Years = [2010, 2020]
 Groups = ['all', 'hl']
 concat_str = ' ... '
@@ -32,8 +32,8 @@ concat_str = ' ... '
 def check_level(level):
     assert level in Levels, f"level must be one of {Levels}, got {level}"
 
-def check_district(district):
-    assert district in Districts, f"district must be one of {Districts}, got {district}"
+def check_district_type(district_type):
+    assert district_type in District_types, f"district must be one of {District_types}, got {district_type}"
 
 def check_year(year):
     assert year in Years, f"year must be one of {Years}, got {year}"

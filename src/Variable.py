@@ -1,11 +1,12 @@
 @dataclasses.dataclass
 class Variable(Base):
     g     : typing.Any
-    name  : str
+    name  : str = 'variable'
     level : str = 'tabblock'
 
     def __post_init__(self):
         self.state = self.g.state
+        self.dt = self.g.district_type
         a = f'{self.name}/{self.state.abbr}'
         self.path = data_path / a
         a = a.replace('/', '_')

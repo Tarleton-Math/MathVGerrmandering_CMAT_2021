@@ -18,6 +18,7 @@ class Votes(Variable):
                 raise Exception(f'can not find {self.raw} - must create elections object first')
             print(f'creating table', end=concat_str)
             self.process()
+        return self
 
 
     def process(self):

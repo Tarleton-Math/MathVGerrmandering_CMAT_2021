@@ -28,6 +28,7 @@ class Combined(Variable):
                 self.process_raw()
             print(f'creating table', end=concat_str)
             self.process()
+        return self
 
 
     def process_raw(self):
