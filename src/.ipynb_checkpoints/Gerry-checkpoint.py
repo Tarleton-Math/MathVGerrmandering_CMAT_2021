@@ -48,18 +48,19 @@ class Gerry(Base):
         self.plans = [g(0)]
         self.hashes = [self.districts.hash]
         for step in range(1,steps+1):
-            print(f'MCMC step {f(step)}')
+            print(f'MCMC {f(step)}', end=concat_str)
             while True:
                 if self.graph.recomb():
-                    self.g.districts.get()
+                    self.districts.update()
                     if self.districts.hash not in self.hashes:
                         self.hashes.append(self.districts.hash)
                         self.plans.append(g(step))
+                        print('success')
                         break
                     else:
-                        print(f'Found a duplicate plan at step {step} - discarding and trying again; hash = {self.districts.hash}')
+                        print(f'Found a duplicate plan at {f(step)} - discarding and trying again; hash = {self.districts.hash}')
                 else:
-                    print('No suitable recomb found at step {step} - trying again')
+                    print(f'No suitable recomb found at {f(step)} - trying again')
                 
         print('MCMC done')
         self.plans = pd.concat(self.plans, axis=1)

@@ -9,6 +9,10 @@ class Districts(Variable):
 
     def get(self):
         print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level} {self.dt}".ljust(32, ' '), end=concat_str)
+        self.update()
+        return self
+        
+    def update(self):
         grp = self.nodes.sort_index().groupby(self.name)
         self.dict  = grp.groups
         self.keys  = tuple(self.dict.keys())
