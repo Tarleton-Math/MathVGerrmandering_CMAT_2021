@@ -43,13 +43,13 @@ class Gerry(Base):
         self.get_data()
 
         d = len(str(steps))
-        f = lambda k: f"plan_{str(k).ljust(d, '0')"
+        f = lambda k: f"plan_{str(k).ljust(d, '0')}"
         g = lambda k: self.nodes.df[self.districts.name].copy().astype(str).rename(f(k))
         self.plans = [g(0)]
         self.hashes = [self.districts.hash]
         for step in range(1,steps+1):
             print(f'MCMC step {f(step)}')
-            while True
+            while True:
                 if self.graph.recomb():
                     self.g.districts.get()
                     if self.districts.hash not in self.hashes:
