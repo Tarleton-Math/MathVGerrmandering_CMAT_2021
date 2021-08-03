@@ -152,5 +152,4 @@ where distance < 1.05 * min_distance
                     break
             if recom_found:
                 break
-#         assert recom_found, "No suitable recomb step found"
         return recom_found

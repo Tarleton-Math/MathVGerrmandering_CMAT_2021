@@ -43,11 +43,24 @@ class Gerry(Base):
         self.get_data()
 
         d = len(str(steps))
-        f = lambda k: self.nodes.df[self.districts.name].copy().astype(str).rename(f"plan_{str(k).ljust(d, '0')}")
-        self.plans = [f(0)]
+        f = lambda k: f"plan_{str(k).ljust(d, '0')"
+        g = lambda k: self.nodes.df[self.districts.name].copy().astype(str).rename(f(k))
+        self.plans = [g(0)]
+        self.hashes = [self.districts.hash]
         for step in range(1,steps+1):
-            if self.graph.recomb():
-                self.plans.append(f(step))
+            print(f'MCMC step {f(step)}')
+            while True
+                if self.graph.recomb():
+                    self.g.districts.get()
+                    if self.districts.hash not in self.hashes:
+                        self.hashes.append(self.districts.hash)
+                        self.plans.append(g(step))
+                        break
+                    else:
+                        print(f'Found a duplicate plan at step {step} - discarding and trying again; hash = {self.districts.hash}')
+                else:
+                    print('No suitable recomb found at step {step} - trying again')
+                
         print('MCMC done')
         self.plans = pd.concat(self.plans, axis=1)
         load_table(tbl=self.tbl, df=self.plans.reset_index(), preview_rows=0)
