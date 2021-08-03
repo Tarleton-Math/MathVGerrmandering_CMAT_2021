@@ -15,15 +15,12 @@ warnings.filterwarnings('ignore', message='.*Pyarrow could not determine the typ
 user_name = input('user_name (default=cook)')
 user_name = 'cook' if user_name=='' else user_name
 
-proj_id = input('proj_id (default=cmat-315920)')
-proj_id = 'cmat-315920' if proj_id=='' else proj_id
-
 random_seed = input('random_seed (default=42)')
 try:
     rng = np.random.RandomState(random_seed)
 except:
     rng = np.random.RandomState(42)
-    
+
 pd.set_option('display.max_columns', None)
 cred, proj = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
 bqclient   = bigquery.Client(credentials=cred, project=proj)
