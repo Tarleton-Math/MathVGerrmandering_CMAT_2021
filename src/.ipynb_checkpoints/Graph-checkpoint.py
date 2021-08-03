@@ -94,7 +94,7 @@ where distance < 1.05 * min_distance
                 
     def recomb(self):
         D = self.g.districts.get()
-        tol = max(D.pop_imbalance, self.pop_imbalance_tol)
+        tol = max(D.pop_imbalance, self.g.pop_imbalance_tol)
         print(f'Current population imbalance = {D.pop_imbalance:.2f}% ... setting population imbalance tolerance = {tol:.2f}%')
         
         best_imbalance = 100
@@ -132,7 +132,7 @@ where distance < 1.05 * min_distance
                         t = q - s
                         if t < s:
                             s, t = t, s
-                        pop_imbalance = (max(t, P_max) - min(s, P_min)) / self.g.pop_ideal * 100
+                        pop_imbalance = (max(t, P_max) - min(s, P_min)) / D.pop_ideal * 100
                         best_imbalance = min(best_imbalance, pop_imbalance)
                         if pop_imbalance > tol:
                             T.add_edge(*e)
