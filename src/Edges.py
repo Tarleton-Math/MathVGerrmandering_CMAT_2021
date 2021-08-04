@@ -32,7 +32,8 @@ from (
         {self.g.combined.tbl} as x,
         {self.g.combined.tbl} as y
     where
-        x.geoid < y.geoid and st_intersects(x.geography, y.geography)
+        x.geoid < y.geoid
+        and st_intersects(x.geography, y.geography)
     )
 where
     shared_perim > 0.1

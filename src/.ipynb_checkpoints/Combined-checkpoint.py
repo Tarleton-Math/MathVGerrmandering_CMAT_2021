@@ -145,6 +145,8 @@ on
 ######## run join query ########
         temp_assign = temp + '_assign'
         load_table(temp_assign, query=query_join, preview_rows=0)
+        for t in tbls:
+            delete_table(t)
 
 ######## agg shapes, census, and votes then join with agg assignments above ########
         cols = self.C.cols + self.V.cols + self.H.cols
@@ -171,6 +173,9 @@ on
 order by
     geoid
 """
+            print(msg, end=concat_str)
+            load_table(out_tbl, query=query, preview_rows=0)
+
         else:
             if agg_centroids:
                 msg += ', centroids'
@@ -216,11 +221,47 @@ on
 order by
     geoid
 """
-        print(msg, end=concat_str)
-        load_table(out_tbl, query=query, preview_rows=0)
+            print(msg, end=concat_str)
+            tbl_color_A = out_tbl + '_color_A'
+            load_table(tbl_color_A, query=query, preview_rows=0)
+            print('assigning colors', end=concat_str)
+
+            query_edges = f"""
+select
+    x.geoid as geoid_x,
+    y.geoid as geoid_y
+from
+    {tbl_color_A} as x,
+    {tbl_color_A} as y
+where
+    x.geoid < y.geoid
+    and st_intersects(x.geography, y.geography)
+"""
+            edges = run_query(query_edges)
+            G = self.g.graph.edges_to_graph(edges)
+            d = nx.coloring.greedy_color(G)
+            
+            colors = pd.DataFrame()
+            colors['geoid'] = d.keys()
+            colors['color'] = d.values()
+            
+            tbl_color_B = out_tbl + '_color_B'
+            load_table(tbl_color_B, df=colors, preview_rows=0)
+            query = f"""
+select
+    A.*,
+    B.color
+from
+    {tbl_color_A} as A
+inner join
+    {tbl_color_B} as B
+on
+    A.geoid = B.geoid
+"""
+            load_table(out_tbl, query=query, preview_rows=0)
+            delete_table(tbl_color_A)
+            delete_table(tbl_color_B)
         
 ######## clean up ########
         delete_table(temp)
         delete_table(temp_assign)
-        for t in tbls:
-            delete_table(t)

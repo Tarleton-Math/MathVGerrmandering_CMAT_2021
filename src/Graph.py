@@ -24,11 +24,10 @@ class Graph(Variable):
                 self.gpickle.parent.mkdir(parents=True, exist_ok=True)
                 nx.write_gpickle(self.graph, self.gpickle)
         return self
-
     
-    def edges_to_graph(self, edges):
-        edge_attr = ['distance', 'shared_perim']
-        return nx.from_pandas_edgelist(edges, source=f'geoid_x', target=f'geoid_y', edge_attr=edge_attr)
+
+    def edges_to_graph(self, edges, edge_attrs=None):
+        return nx.from_pandas_edgelist(edges, source=f'geoid_x', target=f'geoid_y', edge_attr=edge_attrs)
 
 
     def get_components(self, G=None):
@@ -46,7 +45,7 @@ class Graph(Variable):
         finally:
             self.edges = self.g.edges.df
             print(f'returning to graph', end=concat_str)
-        self.graph = self.edges_to_graph(self.edges)
+        self.graph = self.edges_to_graph(self.edges, edge_attrs=('distance', 'shared_perim'))
         nx.set_node_attributes(self.graph, self.nodes[['pop']].to_dict('index'))
         
         print(f'connecting districts', end=concat_str+'\n')

@@ -8,7 +8,8 @@ class Gerry(Base):
     district_type     : str = 'cd'
     agg_shapes        : bool = True
     agg_centroids     : bool = False
-    simplification    : int = 800
+    simplification    : int = 600
+    num_colors        : int = 8
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
     election_filters  : typing.Tuple = (
@@ -45,7 +46,7 @@ class Gerry(Base):
         self.get_data()
 
         d = len(str(steps))
-        f = lambda k: f"plan_{str(k).ljust(d, '0')}"
+        f = lambda k: f"plan_{str(k).rjust(d, '0')}"
         g = lambda k: self.nodes.df[self.districts.name].copy().astype(str).rename(f(k))
         self.plans = [g(0)]
         self.hashes = [self.districts.hash]
@@ -55,6 +56,7 @@ class Gerry(Base):
                 if self.graph.recomb():
                     self.districts.update()
                     if self.districts.hash not in self.hashes:
+                        print(self.districts.hash, end=concat_str)
                         self.hashes.append(self.districts.hash)
                         self.plans.append(g(step))
                         print('success')

@@ -17,9 +17,9 @@ user_name = 'cook' if user_name=='' else user_name
 
 random_seed = input('random_seed (default=42)')
 try:
-    rng = np.random.RandomState(random_seed)
+    rng = np.random.default_rng(random_seed)
 except:
-    rng = np.random.RandomState(42)
+    rng = np.random.default_rng(42)
 
 pd.set_option('display.max_columns', None)
 cred, proj = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
