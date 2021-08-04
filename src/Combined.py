@@ -239,6 +239,7 @@ where
 """
             edges = run_query(query_edges)
             G = self.g.graph.edges_to_graph(edges)
+            print(1+max(G.degree)[1])
             d = nx.equitable_color(G, num_colors=self.g.num_colors)
             
             colors = pd.DataFrame()
