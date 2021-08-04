@@ -8,6 +8,7 @@ class Gerry(Base):
     district_type     : str = 'cd'
     agg_shapes        : bool = True
     agg_centroids     : bool = False
+    simplification    : int = 800
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
     election_filters  : typing.Tuple = (
@@ -72,5 +73,5 @@ class Gerry(Base):
         for col in self.plans.columns:
             out_tbl = self.tbl + f"_{col.split('_')[-1]}"
             print(f'Aggregating {self.combined.raw} by {col} on table {self.tbl}', end=concat_str)
-            self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=out_tbl, district_types=self.districts.name, agg_shapes=self.agg_shapes, agg_centroids=self.agg_centroids)
+            self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=out_tbl, district_types=self.districts.name, agg_shapes=self.agg_shapes, agg_centroids=self.agg_centroids, simplification=self.simplification)
             print('done')

@@ -67,10 +67,10 @@ on
 
     def process(self):
         bqclient.copy_table(self.raw, self.tbl).result()
-        self.agg(agg_tbl=self.g.assignments.tbl, agg_col=self.level, out_tbl=self.tbl, district_types=District_types, agg_shapes=True, agg_centroids=True)
+        self.agg(agg_tbl=self.g.assignments.tbl, agg_col=self.level, out_tbl=self.tbl, district_types=District_types, agg_shapes=True, agg_centroids=True, simplification=0)
 
 
-    def agg(self, agg_tbl, agg_col, out_tbl, district_types=None, agg_shapes=True, agg_centroids=False):
+    def agg(self, agg_tbl, agg_col, out_tbl, district_types=None, agg_shapes=True, agg_centroids=False, simplification=0):
         if district_types is None:
             district_types = self.g.district_type
         district_types = listify(district_types)
@@ -93,7 +93,7 @@ on
 
 ######## agg assignments by most frequent value in each column within each agg region ########
 ######## must compute do this one column at a time, then join ########
-        print(f'aggregating {district_types}', end=concat_str)
+        print(f'aggregating {", ".join(district_types)}', end=concat_str)
         tbls = list()
         c = 64
         for col in district_types:
@@ -149,8 +149,7 @@ on
 ######## agg shapes, census, and votes then join with agg assignments above ########
         cols = self.C.cols + self.V.cols + self.H.cols
         sels = [f'sum({c}) as {c}' for c in cols]
-        
-        data = ['census', 'votes_all', 'votes_hl']
+        msg = 'aggregating census, votes_all, votes_hl'
         if not agg_shapes:
             query = f"""
 select
@@ -173,12 +172,18 @@ order by
     geoid
 """
         else:
-            data += ['shapes']
-            if not agg_centroids:
-                sel_centroids = ""
-            else:
-                data += ['centroid']
+            if agg_centroids:
+                msg += ', centroids'
                 sel_centroids = "st_centroid(geography) as centroid,"
+            else:
+                sel_centroids = ""            
+            
+            msg += f', and shapes with simplification {simplification}'
+            if simplification >= 1:
+                sel_geography = f"st_simplify(geography, {simplification}) as geography"
+            else:
+                sel_geography = "geography"
+                
             query = f"""
 select
     A.*,
@@ -187,7 +192,7 @@ select
     case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
     {join_str(1).join(cols)},
     {sel_centroids}
-    geography
+    {sel_geography}
 from
     {temp_assign} as A
 left join (
@@ -211,7 +216,7 @@ on
 order by
     geoid
 """
-        print(f'aggregating {data}', end=concat_str)
+        print(msg, end=concat_str)
         load_table(out_tbl, query=query, preview_rows=0)
         
 ######## clean up ########
