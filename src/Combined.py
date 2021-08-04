@@ -239,7 +239,7 @@ where
 """
             edges = run_query(query_edges)
             G = self.g.graph.edges_to_graph(edges)
-            d = nx.coloring.greedy_color(G)
+            d = nx.equitable_color(G, num_colors=self.num_colors)
             
             colors = pd.DataFrame()
             colors['geoid'] = d.keys()
