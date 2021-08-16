@@ -151,7 +151,7 @@ from (
                                 recom_found = True
                                 break
                             else:
-                                print(f'Found a duplicate plan {self.g.districts.hash}{end=concat_str}continuing', end=concat_str)
+                                print(f'Found a duplicate plan {self.g.districts.hash}{concat_str}continuing', end=concat_str)
                         T.add_edge(*e)
                 if recom_found:
                     break
