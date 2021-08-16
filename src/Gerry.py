@@ -72,17 +72,14 @@ class Gerry(Base):
             while True:
                 if self.graph.recomb():
                     self.districts.update()
-                    if self.districts.hash not in self.hashes:
-                        print(self.districts.hash, end=concat_str)
-                        self.hashes.append(self.districts.hash)
-                        self.plans.append(g(step))
+                    print(self.districts.hash, end=concat_str)
+                    self.hashes.append(self.districts.hash)
+                    self.plans.append(g(step))
                         
-                        self.districts.stats['plan'] = step
-                        self.stats.append(self.districts.stats.copy())
-                        print('success')
-                        break
-                    else:
-                        print(f'Found a duplicate plan at {f(step)} - discarding and trying again; hash = {self.districts.hash}')
+                    self.districts.stats['plan'] = step
+                    self.stats.append(self.districts.stats.copy())
+                    print('success')
+                    break
                 else:
                     print(f'No suitable recomb found at {f(step)} - trying again')
                 

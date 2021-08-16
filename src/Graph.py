@@ -135,11 +135,8 @@ from (
                             s, t = t, s
                         pop_imbalance = (max(t, P_max) - min(s, P_min)) / districts.pop_ideal * 100
                         best_imbalance = min(best_imbalance, pop_imbalance)
-                        if pop_imbalance > tol:
-                            T.add_edge(*e)
-                        else:
+                        if pop_imbalance < tol:
                             print(f'found recomb with {self.g.district_type} {d0} and {d1} split with pop_imbalance={pop_imbalance:.2f}%', end=concat_str)
-                            recom_found = True
                             comp = self.g.get_components(T)
                             N.loc[comp[0], 'new'] = d0
                             N.loc[comp[1], 'new'] = d1
@@ -148,7 +145,14 @@ from (
                                 d0, d1 = d1, d0
                             self.nodes.loc[comp[0], districts.name] = d0
                             self.nodes.loc[comp[1], districts.name] = d1
-                            break
+                            
+                            self.g.districts.update()
+                            if self.g.districts.hash not in self.g.hashes:
+                                recom_found = True
+                                break
+                            else:
+                                print(f'Found a duplicate plan {self.g.districts.hash}{end=concat_str}continuing', end=concat_str)
+                        T.add_edge(*e)
                 if recom_found:
                     break
             if recom_found:
