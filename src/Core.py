@@ -9,14 +9,6 @@ except:
     os.system('pip install --upgrade google-cloud-bigquery-storage')
     from google.cloud.bigquery_storage import BigQueryReadClient
     
-try:
-    import pandas_bokeh
-except:
-    os.system('pip install --upgrade pandas-bokeh')
-    import pandas_bokeh
-pandas_bokeh.output_notebook()
-pd.set_option('plotting.backend', 'pandas_bokeh')
-    
 import warnings
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
 warnings.filterwarnings('ignore', message='.*Pyarrow could not determine the type of columns*')
