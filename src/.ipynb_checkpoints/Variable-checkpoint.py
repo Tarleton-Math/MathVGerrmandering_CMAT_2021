@@ -6,7 +6,7 @@ class Variable(Base):
 
     def __post_init__(self):
         self.state = self.g.state
-        self.dt = self.g.district_type
+        self.district_type = self.g.district_type
         a = f'{self.name}/{self.state.abbr}'
         self.path = data_path / a
         a = a.replace('/', '_')
@@ -47,7 +47,7 @@ class Variable(Base):
 
 
     def get(self):
-        print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level}".ljust(32, ' '), end=concat_str)
+        print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level}".ljust(33, ' '), end=concat_str)
         exists = dict()
         
         exists['df'] = hasattr(self, 'df')

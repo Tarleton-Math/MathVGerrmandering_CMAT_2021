@@ -1,6 +1,7 @@
 @dataclasses.dataclass
 class Combined(Variable):
     name: str = 'combined'
+    simplification: int = 0
 
     def __post_init__(self):
         self.yr = self.g.shapes_yr
@@ -12,9 +13,9 @@ class Combined(Variable):
         self.A = self.g.assignments
         self.A.cols = Levels + District_types
         self.S = self.g.shapes
-        self.S.cols = ['aland', 'geography']
+        self.S.cols = ['aland', 'polygon']
         self.C = self.g.census
-        self.C.cols = ['total']
+        self.C.cols = census_columns['data']
         self.V = self.g.votes_all
         E = get_cols(self.V.tbl)
         self.V.cols = [f'{e}_all' for e in E]
@@ -67,18 +68,17 @@ on
 
     def process(self):
         bqclient.copy_table(self.raw, self.tbl).result()
-        self.agg(agg_tbl=self.g.assignments.tbl, agg_col=self.level, out_tbl=self.tbl, district_types=District_types, agg_shapes=True, agg_centroids=True, simplification=0)
+        self.agg(agg_tbl=self.g.assignments.tbl, agg_col=self.level, out_tbl=self.tbl, agg_district=True, agg_polygon=True, agg_point=True, simplification=self.simplification, clr_tbl=None)
 
-
-    def agg(self, agg_tbl, agg_col, out_tbl, district_types=None, agg_shapes=True, agg_centroids=False, simplification=0):
-        if district_types is None:
-            district_types = self.g.district_type
-        district_types = listify(district_types)
-
+        
+        
+    def agg(self, agg_tbl, agg_col, out_tbl, agg_district=True, agg_polygon=True, agg_point=False, simplification=0, clr_tbl=None):
+######################################
 ######## join tbl and agg_tbl ########
-        print(f'joining {self.tbl} and {agg_tbl}', end=concat_str)
-        temp = out_tbl + '_temp'
-        query = f"""
+######################################
+        print('joining', end=concat_str)
+        temp_tbl = out_tbl + '_temp'
+        temp_query = f"""
 select
     B.{agg_col} as geoid_new,
     A.*
@@ -89,17 +89,81 @@ left join
 on
     A.geoid = B.geoid
 """
-        load_table(temp, query=query, preview_rows=0)
+        load_table(temp_tbl, query=temp_query, preview_rows=0)
 
-######## agg assignments by most frequent value in each column within each agg region ########
-######## must compute do this one column at a time, then join ########
-        print(f'aggregating {", ".join(district_types)}', end=concat_str)
-        tbls = list()
-        c = 64
-        for col in district_types:
-            t = temp + f'_{col}'
-            tbls.append(t)
-            query_assign = f"""
+
+#######################################################
+######## agg shapes, census, votes, and shapes ########
+#######################################################
+        msg = 'aggregating census, votes_all, votes_hl'
+        cols = self.C.cols + self.V.cols + self.H.cols
+        sels = [f'sum({c}) as {c}' for c in cols]
+        if not agg_polygon:
+            msg += 'without shapes'
+            print('aggregating without shapes', end=concat_str)
+            main_query = f"""
+select
+    geoid_new as geoid,
+    {join_str(1).join(sels)}
+from
+    {temp_tbl}
+group by
+    1
+"""
+
+        else:
+            msg += ', polygons'
+            if agg_point:
+                msg += ', and points'
+                sel_point = "st_centroid(polygon) as point,"
+            else:
+                sel_point = ""            
+            msg += f' with simplification {simplification}'
+            if simplification >= 1:
+                sel_polygon = f"st_simplify(polygon, {simplification}) as polygon"
+            else:
+                sel_polygon = "polygon"
+                
+            main_query = f"""
+select
+    geoid,
+    aland,
+    perim,
+    case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
+    {join_str(1).join(cols)},
+    {sel_point}
+    {sel_polygon}
+from (
+    select
+        *,
+        st_perimeter(polygon) as perim
+    from (
+        select
+            geoid_new as geoid,
+            {join_str(3).join(sels)},
+            sum(aland) as aland,
+            st_union_agg(polygon) as polygon
+        from
+            {temp_tbl}
+        group by
+            1
+        )
+    )
+"""
+            
+############################################################################################
+######## agg districts by most frequent value in each column within each agg region ########
+######## must do this one column at a time, then join ######################################
+############################################################################################
+        district_tbl = temp_tbl + '_district'    
+        if agg_district:
+            print(f'aggregating {", ".join(District_types)}', end=concat_str)
+            tbls = list()
+            c = 64
+            for col in District_types:
+                t = temp_tbl + f'_{col}'
+                tbls.append(t)
+                district_query = f"""
 select
     geoid,
     {col},
@@ -113,7 +177,7 @@ from (
             {col},
             count(1) as N
         from
-            {temp}
+            {temp_tbl}
         group by
             geoid, {col}
         )
@@ -121,148 +185,66 @@ from (
 where
     r = 1
 """
-            load_table(t, query=query_assign, preview_rows=0)
-            
+                load_table(t, query=district_query, preview_rows=0)
 ######## create the join query as we do each col so we can run it at the end ########
-            c += 1
-            if len(tbls) <= 1:
-                query_join = f"""
+                c += 1
+                if len(tbls) <= 1:
+                    join_query = f"""
 select
     A.geoid,
-    {join_str(1).join(district_types)}
+    {join_str(1).join(District_types)}
 from
     {t} as A
 """
-            else:
-                alias = chr(c)
-                query_join +=f"""
+                else:
+                    alias = chr(c)
+                    join_query +=f"""
 left join
     {t} as {alias}
 on
     A.geoid = {alias}.geoid
 """
-            
 ######## run join query ########
-        temp_assign = temp + '_assign'
-        load_table(temp_assign, query=query_join, preview_rows=0)
-        for t in tbls:
-            delete_table(t)
+            load_table(district_tbl, query=join_query, preview_rows=0)
+            for t in tbls:
+                delete_table(t)
 
-######## agg shapes, census, and votes then join with agg assignments above ########
-        cols = self.C.cols + self.V.cols + self.H.cols
-        sels = [f'sum({c}) as {c}' for c in cols]
-        msg = 'aggregating census, votes_all, votes_hl'
-        if not agg_shapes:
-            query = f"""
+######## insert join into main query ########
+            main_query = f"""
 select
     A.*,
-    {join_str(1).join(cols)}
-from
-    {temp_assign} as A
-left join (
-    select
-        geoid_new as geoid,
-        {join_str(1).join(sels)}
-    from
-        {temp}
-    group by
-        1
-    ) as B
+    {join_str(1).join(District_types)}
+from (
+    {main_query}
+    ) as A
+left join
+    {district_tbl} as B
 on
     A.geoid = B.geoid
-order by
-    geoid
 """
-            print(msg, end=concat_str)
-            load_table(out_tbl, query=query, preview_rows=0)
-
-        else:
-            if agg_centroids:
-                msg += ', centroids'
-                sel_centroids = "st_centroid(geography) as centroid,"
-            else:
-                sel_centroids = ""            
-            
-            msg += f', and shapes with simplification {simplification}'
-            if simplification >= 1:
-                sel_geography = f"st_simplify(geography, {simplification}) as geography"
-            else:
-                sel_geography = "geography"
-                
-            query = f"""
-select
-    A.*,
-    aland,
-    perim,
-    case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
-    {join_str(1).join(cols)},
-    {sel_centroids}
-    {sel_geography}
-from
-    {temp_assign} as A
-left join (
-    select
-        *,
-        st_perimeter(geography) as perim
-    from (
-        select
-            geoid_new as geoid,
-            {join_str(1).join(sels)},
-            sum(aland) as aland,
-            st_union_agg(geography) as geography
-        from
-            {temp}
-        group by
-            1
-        )
-    ) as B
-on
-    A.geoid = B.geoid
-order by
-    geoid
-"""
-            print(msg, end=concat_str)
-            tbl_color_A = out_tbl + '_color_A'
-            load_table(tbl_color_A, query=query, preview_rows=0)
-            print('assigning colors', end=concat_str)
-
-            query_edges = f"""
-select
-    x.geoid as geoid_x,
-    y.geoid as geoid_y
-from
-    {tbl_color_A} as x,
-    {tbl_color_A} as y
-where
-    x.geoid < y.geoid
-    and st_intersects(x.geography, y.geography)
-"""
-            edges = run_query(query_edges)
-            G = self.g.graph.edges_to_graph(edges)
-            print(1+max(G.degree)[1])
-            d = nx.equitable_color(G, num_colors=self.g.num_colors)
-            
-            colors = pd.DataFrame()
-            colors['geoid'] = d.keys()
-            colors['color'] = d.values()
-            
-            tbl_color_B = out_tbl + '_color_B'
-            load_table(tbl_color_B, df=colors, preview_rows=0)
-            query = f"""
+        
+#############################
+######## join colors ########
+#############################
+        if clr_tbl is not None:
+            msg += f' with colors'
+            main_query = f"""
 select
     A.*,
     B.color
-from
-    {tbl_color_A} as A
-inner join
-    {tbl_color_B} as B
+from (
+    {main_query}
+    ) as A
+left join
+    {clr_tbl} as B
 on
     A.geoid = B.geoid
 """
-            load_table(out_tbl, query=query, preview_rows=0)
-            delete_table(tbl_color_A)
-            delete_table(tbl_color_B)
         
-######## clean up ########
-        delete_table(temp)
-        delete_table(temp_assign)
+#######################################################
+######## run main_query and clean up temp tbls ########
+#######################################################
+        print(msg, end=concat_str)
+        load_table(out_tbl, query=main_query, preview_rows=0)             
+        delete_table(temp_tbl)
+        delete_table(district_tbl)

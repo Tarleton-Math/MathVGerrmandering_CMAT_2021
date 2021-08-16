@@ -10,7 +10,7 @@ class Graph(Variable):
 
 
     def get(self):
-        print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level} {self.dt}".ljust(32, ' '), end=concat_str)
+        print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level} {self.district_type}".ljust(33, ' '), end=concat_str)
         try:
             self.graph
             print(f'graph exists', end=concat_str)
@@ -23,17 +23,12 @@ class Graph(Variable):
                 self.process()
                 self.gpickle.parent.mkdir(parents=True, exist_ok=True)
                 nx.write_gpickle(self.graph, self.gpickle)
+        
         return self
     
 
     def edges_to_graph(self, edges, edge_attrs=None):
         return nx.from_pandas_edgelist(edges, source=f'geoid_x', target=f'geoid_y', edge_attr=edge_attrs)
-
-
-    def get_components(self, G=None):
-        if G is None:
-            G = self.graph
-        return sorted([tuple(c) for c in nx.connected_components(G)], key=lambda x:len(x), reverse=True)
 
         
     def process(self):
@@ -42,18 +37,18 @@ class Graph(Variable):
         except:
             print(f'get edges first')
             self.g.edges = Edges(g=self.g)
-        finally:
             self.edges = self.g.edges.df
             print(f'returning to graph', end=concat_str)
         self.graph = self.edges_to_graph(self.edges, edge_attrs=('distance', 'shared_perim'))
-        nx.set_node_attributes(self.graph, self.nodes[['pop']].to_dict('index'))
+        nx.set_node_attributes(self.graph, self.nodes[list(self.g.node_attrs)].to_dict('index'))
         
         print(f'connecting districts', end=concat_str+'\n')
-        for D, N in self.nodes.groupby(self.dt):
+        for D, N in self.nodes.groupby(self.district_type):
             while True:
                 H = self.graph.subgraph(N.index)
-                comp = self.get_components(H)
-                print(f"District {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}", end=concat_str)
+                comp = self.g.get_components(H)
+                print(f"District {self.district_type} {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}", end=concat_str)
+
                 if len(comp) == 1:
                     print('connected')
                     break
@@ -84,7 +79,7 @@ from (
             and y.geoid in ('{C[1]}')
         )
     )
-where distance < 1.05 * min_distance
+--where distance < 1.05 * min_distance
 """
                     new_edges = run_query(query)
                     self.graph.update(self.edges_to_graph(new_edges))
@@ -92,24 +87,29 @@ where distance < 1.05 * min_distance
                 
                 
     def recomb(self):
-        D = self.g.districts.update()
-        tol = max(D.pop_imbalance, self.g.pop_imbalance_tol)
-        print(f'Current pop imbalance = {D.pop_imbalance:.2f}%{concat_str}setting tol = {tol:.2f}%', end=concat_str)
+        districts = self.g.districts.update()
+        tol = max(districts.pop_imbalance, districts.pop_imbalance_tol)
+        print(f'Current pop imbalance = {districts.pop_imbalance:.2f}%{concat_str}setting tol = {tol:.2f}%', end=concat_str)
         
         best_imbalance = 100
         recom_found = False
-        R = rng.permutation([(a,b) for a in D.keys for b in D.keys if a < b]).tolist()
-        for pair in R:
-            N = self.nodes.query(f'{D.name} in {pair}').copy()
-            H = self.graph.subgraph(N.index)
+#         R = rng.permutation(np.array([(d0, d1, n0, n1) for d0, n0 in districts.tuple for d1, n1 in districts.tuple if d0 < d1], dtype=object))
+#         for d0, d1, n0, n1 in R:
+        q = districts.pops.sort_values(ascending=False).index
+        d0 = q[-1]
+        for d1 in q:
+#             m = list(n0+n1)
+            m = list(districts.dict[d0]+districts.dict[d1])
+            N = self.nodes.loc[m]
+            H = self.graph.subgraph(m)
             if not nx.is_connected(H):
-#                 print(f'{district_pair} not connected')
+#                 print(f'{d0, d1} not connected')
                 continue
 #             else:
-#                 print(f'{pair} connected')
-            P = D.pops.copy()
-            p0 = P.pop(pair[0])
-            p1 = P.pop(pair[1])
+#                 print(f'{d0, d1} connected')
+            P = districts.pops.copy()
+            p0 = P.pop(d0)
+            p1 = P.pop(d1)
             q = p0 + p1
             P_min, P_max = P.min(), P.max()
             trees = []
@@ -125,27 +125,29 @@ where distance < 1.05 * min_distance
                     max_tries = max(100, int(0.02 * len(B)))
                     for e, cent in B[:max_tries]:
                         T.remove_edge(*e)
-                        comp = nx.connected_components(T)
+#                         comp = nx.connected_components(T)
+#                         print(len(list(comp)))
+                        comp = nx.connected_components(T)                
                         next(comp)
-                        s = sum(T.nodes[n]['pop'] for n in next(comp))
+                        s = sum(T.nodes[n]['total_pop'] for n in next(comp))
                         t = q - s
                         if t < s:
                             s, t = t, s
-                        pop_imbalance = (max(t, P_max) - min(s, P_min)) / D.pop_ideal * 100
+                        pop_imbalance = (max(t, P_max) - min(s, P_min)) / districts.pop_ideal * 100
                         best_imbalance = min(best_imbalance, pop_imbalance)
                         if pop_imbalance > tol:
                             T.add_edge(*e)
                         else:
-#                             print(f'found split with pop_imbalance={pop_imbalance.round(1)}')
+                            print(f'found recomb with {self.g.district_type} {d0} and {d1} split with pop_imbalance={pop_imbalance:.2f}%', end=concat_str)
                             recom_found = True
-                            comp_new = self.get_components(T)
-                            for n, d in zip(comp_new, pair):
-                                N.loc[n, 'new'] = d
-                            i = N.groupby([D.name, 'new'])['aland'].sum().idxmax()
+                            comp = self.g.get_components(T)
+                            N.loc[comp[0], 'new'] = d0
+                            N.loc[comp[1], 'new'] = d1
+                            i = N.groupby(['new', districts.name])['aland'].sum().idxmax()
                             if i[0] != i[1]:
-                                comp_new[0], comp_new[1] = comp_new[1], comp_new[0]
-                            for n, d in zip(comp_new, pair):
-                                self.nodes.loc[n, D.name] = d
+                                d0, d1 = d1, d0
+                            self.nodes.loc[comp[0], districts.name] = d0
+                            self.nodes.loc[comp[1], districts.name] = d1
                             break
                 if recom_found:
                     break

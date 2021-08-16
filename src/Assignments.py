@@ -35,8 +35,8 @@ class Assignments(Variable):
                 L.append(df.set_index('geoid'))
                 os.unlink(fn)
         self.df = lower(pd.concat(L, axis=1).reset_index()).sort_values('geoid')
-        c = ['cd', 'sldu', 'sldl']
-        self.df[c] = self.df[c].astype(int)
+#         c = ['cd', 'sldu', 'sldl']
+#         self.df[c] = self.df[c].astype(int)
         c = self.df['geoid'].str
         self.df.insert(1, 'state'   , c[:2])
         self.df.insert(1, 'cnty'    , c[:5])

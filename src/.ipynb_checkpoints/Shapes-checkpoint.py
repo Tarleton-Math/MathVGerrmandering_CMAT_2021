@@ -54,7 +54,7 @@ class Shapes(Variable):
 select
     geoid,
     cast(aland as float64) as aland,
-    st_geogfrom(geometry) as geography
+    st_geogfrom(geometry) as polygon
 from
     {self.raw}
 order by

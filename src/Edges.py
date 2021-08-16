@@ -27,16 +27,16 @@ from (
         x.geoid as geoid_x,
         y.geoid as geoid_y,        
         st_distance(x.point, y.point) as distance,
-        st_length(st_intersection(x.geography, y.geography)) as shared_perim
+        st_length(st_intersection(x.polygon, y.polygon)) as shared_perim
     from
         {self.g.combined.tbl} as x,
         {self.g.combined.tbl} as y
     where
         x.geoid < y.geoid
-        and st_intersects(x.geography, y.geography)
+        and st_intersects(x.polygon, y.polygon)
     )
 where
-    shared_perim > 0.1
+    shared_perim > 10
 order by
     geoid_x, geoid_y
 """

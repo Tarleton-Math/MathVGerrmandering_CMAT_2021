@@ -9,12 +9,14 @@ class Crosswalks(Variable):
 
     def get(self):
         self.url = f"https://www2.census.gov/geo/docs/maps-data/data/rel{self.g.shapes_yr}/t{str(self.g.census_yr)[2:]}t{str(self.g.shapes_yr)[2:]}/TAB{self.g.census_yr}_TAB{self.g.shapes_yr}_ST{self.state.fips}.zip"
-        
         exists = super().get()
-        if not exists['tbl']:
-            self.get_zip()
-            print(f'creating table', end=concat_str)
-            self.process()
+        if self.yr < 2020:
+            if not exists['tbl']:
+                self.get_zip()
+                print(f'creating table', end=concat_str)
+                self.process()
+        else:
+            print(f'not necessary', end=concat_str)
         return self
 
 
