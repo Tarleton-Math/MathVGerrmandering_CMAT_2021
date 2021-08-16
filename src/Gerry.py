@@ -64,20 +64,23 @@ class Gerry(Base):
         f = lambda k: f"plan_{str(k).rjust(d, '0')}"
         g = lambda k: self.nodes.df[self.districts.name].copy().astype(str).rename(f(k))
 
-        self.plans  = [g(0)]
-        self.hashes = [self.districts.hash]
-        self.stats  = [self.districts.stats.copy()]
+        self.plans   = [g(0)]
+        self.hashes  = [self.districts.hash]
+        self.stats   = [self.districts.stats.copy()]
+        self.summary = [self.districts.summary.copy()]
         for step in range(1,steps+1):
             print(f'MCMC {f(step)}', end=concat_str)
             while True:
                 if self.graph.recomb():
                     self.districts.update()
+                    self.districts.stats  ['plan'] = step
+                    self.districts.summary['plan'] = step
+                    
                     print(self.districts.hash, end=concat_str)
-                    self.hashes.append(self.districts.hash)
                     self.plans.append(g(step))
-                        
-                    self.districts.stats['plan'] = step
+                    self.hashes.append(self.districts.hash)
                     self.stats.append(self.districts.stats.copy())
+                    self.summary.append(self.districts.summary.copy())
                     print('success')
                     break
                 else:
@@ -91,6 +94,9 @@ class Gerry(Base):
         cols = self.stats.columns.to_list()
         cols[0], cols[1] = cols[1], cols[0]
         load_table(tbl=self.tbl+'_stats', df=self.stats[cols], preview_rows=0)
+        
+        self.summary = pd.DataFrame.from_dict(self.summary).set_index('plan')
+        load_table(tbl=self.tbl+'_summary', df=self.summary.reset_index(), preview_rows=0)
         self.agg_plans()
         
     def agg_plans(self):

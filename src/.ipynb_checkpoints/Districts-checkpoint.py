@@ -45,4 +45,9 @@ class Districts(Variable):
             self.stats['color'] = self.color
         except:
             pass
+        
+        self.summary = {'plan' : 0,
+                        'pop_imbalance' : self.pop_imbalance,
+                        'polsby_popper' : self.stats['polsby_popper'].mean()
+                       }
         return self

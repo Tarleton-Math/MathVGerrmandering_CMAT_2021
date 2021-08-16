@@ -119,11 +119,11 @@ group by
             else:
                 sel_point = ""            
             msg += f' with simplification {simplification}'
-            if simplification >= 1:
-                sel_polygon = f"st_simplify(polygon, {simplification}) as polygon"
-            else:
-                sel_polygon = "polygon"
-                
+            sel_polygon = f"st_simplify(polygon, {simplification}) as polygon"
+#             if simplification >= 1:
+#                 sel_polygon = f"st_simplify(polygon, {simplification}) as polygon"
+#             else:
+#                 sel_polygon = "polygon"
             main_query = f"""
 select
     geoid,
