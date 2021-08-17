@@ -112,7 +112,7 @@ class Gerry(Base):
 
 
     def stack_plans(self):
-        L = [f"select {v['col']} as plan, * from {v['tbl']}" for k, v in self.steps.items()]
+        L = [f"select {k} as plan, * from {v['tbl']}" for k, v in self.steps.items()]
         j = "\nunion all\n"
         query = j.join(L) + "\norder by plan, geoid"
         load_table(tbl=self.tbl+'_stacked', query=query, preview_rows=0)
