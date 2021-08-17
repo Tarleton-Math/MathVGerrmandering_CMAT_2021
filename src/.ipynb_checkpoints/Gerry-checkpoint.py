@@ -65,15 +65,17 @@ class Gerry(Base):
         d = len(str(steps))
         f = lambda k: f"plan_{str(k).rjust(d, '0')}"
         g = lambda k: self.nodes.df[self.districts.name].copy().astype(str).rename(f(k))
-        self.steps    = {k:{'col':f(k), 'tbl':self.tbl+'_'+f(k)} for k in range(steps+1)}
-        return
+#         self.steps    = [{'col':f(k), 'tbl':self.tbl+'_'+f(k)} for k in range(steps+1)]
+        self.steps    = [[k, f(k), self.tbl+'_'+f(k)] for k in range(steps+1)]
 
         self.plans   = [g(0)]
         self.hashes  = [self.districts.hash]
         self.stats   = [self.districts.stats.copy()]
         self.summary = [self.districts.summary.copy()]
-        for k, v in self.steps.items():
-            print(f"MCMC {v['col']}", end=concat_str)
+        for k, col, tbl in self.steps:
+            if k == 0:
+                continue
+            print(f"MCMC {col}", end=concat_str)
             while True:
                 if self.graph.recomb():
                     self.districts.update()
@@ -88,7 +90,7 @@ class Gerry(Base):
                     print('success')
                     break
                 else:
-                    print(f"No suitable recomb found at {v['col']} - trying again")
+                    print(f"No suitable recomb found at {col} - trying again")
                 
         print('MCMC done')
         self.plans = pd.concat(self.plans, axis=1)
@@ -104,56 +106,17 @@ class Gerry(Base):
 
 
     def agg_plans(self, start=0, stop=999999):
-        for k, v in self.steps.items():
+        for k, col, tbl in self.steps:
             if start <= k and k <= stop:
-                print(f"Post-processing {v['col']} to make {v['tbl']}", end=concat_str)
-                self.combined.agg(agg_tbl=self.tbl, agg_col=v['col'], out_tbl=v['tbl'], agg_district=False, agg_polygon=self.agg_polygon, agg_point=self.agg_point, clr_tbl=self.districts.tbl, simplification=self.simplification)
+                print(f"Post-processing {col} to make {tbl}", end=concat_str)
+                self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=tbl, agg_district=False, agg_polygon=self.agg_polygon, agg_point=self.agg_point, clr_tbl=self.districts.tbl, simplification=self.simplification)
                 print('done')
 
 
     def stack_plans(self):
-        L = [f"select {k} as plan, * from {v['tbl']}" for k, v in self.steps.items()]
+        L = [f"select {k} as plan, * from {tbl}" for k, col, tbl in self.steps]
         j = "\nunion all\n"
         query = j.join(L) + "\norder by plan, geoid"
         load_table(tbl=self.tbl+'_stacked', query=query, preview_rows=0)
-        for k, v in self.steps.items():
-            delete_table(v['tbl'])
-            
-            
-    def make_images(self, animate=False, num_steps=1000000):
-        tbl = self.tbl+'_stacked'
-#         df = bqclient.query(f'select * from {tbl}').result().to_dataframe().rename(columns={'geoid':district_type}
-        df = read_table(tbl).rename(columns={'geoid':self.district_type})
-        geo = gpd.GeoSeries.from_wkt(df['polygon'], crs='EPSG:4326').simplify(0.05).buffer(0)
-        gdf = gpd.GeoDataFrame(df, geometry=geo)
-        gdf['color'] = gdf['color'].astype(str)
-        gdf['locations'] = gdf.index
-        opts = {
-            'locations' : 'locations',
-            'color' : "color",
-            'color_discrete_sequence' : px.colors.qualitative.T10,
-            'mapbox_style' : 'carto-positron',
-            'opacity' : .4,
-            'center' : {'lat': 31.3, 'lon': -100.15},
-            'hover_data' : {'color':False, 'plan': False, 'locations':False,
-                            'cd': True, 'total_pop': True, 'polsby_popper': True}
-        }
-
-        if animate:
-            opts['zoom'] = 4.0; opts['width'] = 120 * opts['zoom']; opts['height'] = 1.065 * opts['width']
-            X = gdf.query(f'plan <= {num_steps}')
-            fig = px.choropleth_mapbox(X, geojson=X.geometry, **opts, animation_frame='plan', animation_group=X[district_type])
-            fig.update_geos(fitbounds="locations", visible=False)
-            fig.update(layout_showlegend=False)
-            fig.write_html(root_path / 'images/recomb.html', auto_play=False)#, include_plotlyjs=True)
-            fig.show()
-        else:
-            opts['zoom'] = 4.0; opts['width'] = 145 * opts['zoom']; opts['height'] = 1.065 * opts['width']
-            for k in range(num_steps+1):
-                print(k)
-                X = gdf.query(f'plan == {k}')
-                fig = px.choropleth_mapbox(X, geojson=X.geometry, **opts)
-                fig.update_geos(fitbounds="locations", visible=False)
-                fig.update(layout_showlegend=False)
-                fig.write_html(root_path / f'images/html/recomb_{str(k).rjust(2,"0")}.html')
-                fig.write_image(root_path / f'images/png/recomb_{str(k).rjust(2,"0")}.png')
+        for k, col, tbl in self.steps:
+            delete_table(tbl)
