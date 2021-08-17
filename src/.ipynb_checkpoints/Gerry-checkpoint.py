@@ -6,8 +6,6 @@ class Gerry(Base):
     shapes_yr         : int = 2020
     census_yr         : int = 2020
     district_type     : str = 'cd'
-    agg_polygon       : bool = True
-    agg_point         : bool = False
     simplification    : int = 600
     num_colors        : int = 8
     refresh_tbl       : typing.Tuple = ()
@@ -65,9 +63,7 @@ class Gerry(Base):
         d = len(str(steps))
         f = lambda k: f"plan_{str(k).rjust(d, '0')}"
         g = lambda k: self.nodes.df[self.districts.name].copy().astype(str).rename(f(k))
-#         self.steps    = [{'col':f(k), 'tbl':self.tbl+'_'+f(k)} for k in range(steps+1)]
         self.steps    = [[k, f(k), self.tbl+'_'+f(k)] for k in range(steps+1)]
-
         self.plans   = [g(0)]
         self.hashes  = [self.districts.hash]
         self.stats   = [self.districts.stats.copy()]
@@ -105,11 +101,11 @@ class Gerry(Base):
         load_table(tbl=self.tbl+'_summary', df=self.summary.reset_index(), preview_rows=0)
 
 
-    def agg_plans(self, start=0, stop=999999):
+    def agg_plans(self, start=0, stop=999999, agg_polygon_steps=tuple()):
         for k, col, tbl in self.steps:
             if start <= k and k <= stop:
                 print(f"Post-processing {col} to make {tbl}", end=concat_str)
-                self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=tbl, agg_district=False, agg_polygon=self.agg_polygon, agg_point=self.agg_point, clr_tbl=self.districts.tbl, simplification=self.simplification)
+                self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=tbl, agg_district=False, agg_polygon=k in listify(agg_polygon_steps), agg_point=False, clr_tbl=self.districts.tbl, simplification=self.simplification)
                 print('done')
 
 

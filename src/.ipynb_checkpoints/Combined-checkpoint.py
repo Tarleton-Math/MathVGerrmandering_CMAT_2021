@@ -91,6 +91,10 @@ on
 """
         load_table(temp_tbl, query=temp_query, preview_rows=0)
 
+# ST_GEOGPOINT(-100, 31) as point,
+    
+    
+#     ST_GEOGPOINT(-100, 31) as point,
 
 #######################################################
 ######## agg shapes, census, votes, and shapes ########
@@ -99,12 +103,16 @@ on
         cols = self.C.cols + self.V.cols + self.H.cols
         sels = [f'sum({c}) as {c}' for c in cols]
         if not agg_polygon:
-            msg += 'without shapes'
-            print('aggregating without shapes', end=concat_str)
+            msg += ' WITHOUT polygons'
             main_query = f"""
 select
     geoid_new as geoid,
-    {join_str(1).join(sels)}
+    0 as aland,
+    0 as perim,
+    0 as polsby_popper,
+    {join_str(1).join(sels)},
+    ST_GEOGFROMTEXT("POINT(-100.0 31.0)") as point,
+    ST_GEOGFROMTEXT("POLYGON((-100.0 31.0, -100.1 31.0, -100.0 31.1, -100.0 31.0))") as polygon
 from
     {temp_tbl}
 group by
@@ -112,18 +120,12 @@ group by
 """
 
         else:
-            msg += ', polygons'
+            msg += f' WITH polygons with simplification {simplification}'
             if agg_point:
-                msg += ', and points'
-                sel_point = "st_centroid(polygon) as point,"
+                msg += ' and points'
+                sel_point = "st_centroid(polygon) as point"
             else:
-                sel_point = ""            
-            msg += f' with simplification {simplification}'
-            sel_polygon = f"st_simplify(polygon, {simplification}) as polygon"
-#             if simplification >= 1:
-#                 sel_polygon = f"st_simplify(polygon, {simplification}) as polygon"
-#             else:
-#                 sel_polygon = "polygon"
+                sel_point = f'ST_GEOGFROMTEXT("POINT(-100.0 31.0)") as point'
             main_query = f"""
 select
     geoid,
@@ -131,8 +133,8 @@ select
     perim,
     case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
     {join_str(1).join(cols)},
-    {sel_point}
-    {sel_polygon}
+    {sel_point},
+    st_simplify(polygon, {simplification}) as polygon
 from (
     select
         *,
