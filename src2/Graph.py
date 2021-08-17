@@ -98,8 +98,6 @@ from (
         q = districts.pops.sort_values().index
         for d0 in q:
             for d1 in reversed(q):
-                if d0 == d1:
-                    continue
                 m = list(districts.dict[d0]+districts.dict[d1])
                 N = self.nodes.loc[m]
                 H = self.graph.subgraph(m)

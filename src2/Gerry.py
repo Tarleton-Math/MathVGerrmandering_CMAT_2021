@@ -26,7 +26,6 @@ class Gerry(Base):
         check_year(self.shapes_yr)
         self.state = states[states['abbr']==self.abbr].iloc[0]
         self.__dict__.update(self.state)
-        self.get_data()
 
     def get_data(self):
         self.tbl = f'{bq_dataset}.{user_name}_plans_{self.state.abbr}_{self.census_yr}_{self.level}_{self.district_type}'
@@ -56,39 +55,36 @@ class Gerry(Base):
             G = self.graph.graph
         k = max([d for n, d in G.degree]) + 1
         return pd.Series(nx.equitable_color(G, k)) + 1
-    
-    
-    
 
         
     def MCMC(self, steps=10):
+        self.get_data()
+
         d = len(str(steps))
         f = lambda k: f"plan_{str(k).rjust(d, '0')}"
         g = lambda k: self.nodes.df[self.districts.name].copy().astype(str).rename(f(k))
-        self.steps    = {k:{'col':f(k), 'tbl':self.tbl+'_'+f(k)} for k in range(steps+1)}
-        return
 
         self.plans   = [g(0)]
         self.hashes  = [self.districts.hash]
         self.stats   = [self.districts.stats.copy()]
         self.summary = [self.districts.summary.copy()]
-        for k, v in self.steps.items():
-            print(f"MCMC {v['col']}", end=concat_str)
+        for step in range(1,steps+1):
+            print(f'MCMC {f(step)}', end=concat_str)
             while True:
                 if self.graph.recomb():
                     self.districts.update()
-                    self.districts.stats  ['plan'] = k
-                    self.districts.summary['plan'] = k
+                    self.districts.stats  ['plan'] = step
+                    self.districts.summary['plan'] = step
                     
                     print(self.districts.hash, end=concat_str)
-                    self.plans.append(g(k))
+                    self.plans.append(g(step))
                     self.hashes.append(self.districts.hash)
                     self.stats.append(self.districts.stats.copy())
                     self.summary.append(self.districts.summary.copy())
                     print('success')
                     break
                 else:
-                    print(f"No suitable recomb found at {v['col']} - trying again")
+                    print(f'No suitable recomb found at {f(step)} - trying again')
                 
         print('MCMC done')
         self.plans = pd.concat(self.plans, axis=1)
@@ -101,20 +97,29 @@ class Gerry(Base):
         
         self.summary = pd.DataFrame.from_dict(self.summary).set_index('plan')
         load_table(tbl=self.tbl+'_summary', df=self.summary.reset_index(), preview_rows=0)
+        self.agg_plans()
+        
+    def agg_plans(self):
+        plans = self.plans.columns
+        tbls = list()
+        for col in plans:
+            out_tbl = self.tbl + f"_{col.split('_')[-1]}"
+            tbls.append(out_tbl)
+            print(f'Post-processing {col} to make {out_tbl}', end=concat_str)
+            self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=out_tbl, agg_district=False, agg_polygon=self.agg_polygon, agg_point=self.agg_point, clr_tbl=self.districts.tbl, simplification=self.simplification)
+            print('done')
 
-
-    def agg_plans(self, start=0, stop=999999):
-        for k, v in self.steps.items():
-            if start <= k and k <= stop:
-                print(f"Post-processing {v['col']} to make {v['tbl']}", end=concat_str)
-                self.combined.agg(agg_tbl=self.tbl, agg_col=v['col'], out_tbl=v['tbl'], agg_district=False, agg_polygon=self.agg_polygon, agg_point=self.agg_point, clr_tbl=self.districts.tbl, simplification=self.simplification)
-                print('done')
-
-
-    def stack_plans(self):
-        L = [f"select {v['col']} as plan, * from {v['tbl']}" for k, v in self.steps.items()]
+#         cols = ',\n    '.join([s.name for s in bqclient.get_table(tbls[0]).schema if s.name not in ['polygon', 'color']])
+        L = [f"""
+select
+    {int(t.split('_')[-1])} as plan,
+    *
+from 
+    {t}
+"""
+            for t in tbls]
         j = "\nunion all\n"
         query = j.join(L) + "\norder by plan, geoid"
         load_table(tbl=self.tbl+'_stacked', query=query, preview_rows=0)
-        for k, v in self.steps.items():
-            delete_table(v['tbl'])
+        for t in tbls:
+            delete_table(t)
