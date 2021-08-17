@@ -118,3 +118,42 @@ class Gerry(Base):
         load_table(tbl=self.tbl+'_stacked', query=query, preview_rows=0)
         for k, v in self.steps.items():
             delete_table(v['tbl'])
+            
+            
+    def make_images(self, animate=False, num_steps=1000000):
+        tbl = self.tbl+'_stacked'
+#         df = bqclient.query(f'select * from {tbl}').result().to_dataframe().rename(columns={'geoid':district_type}
+        df = read_table(tbl).rename(columns={'geoid':self.district_type})
+        geo = gpd.GeoSeries.from_wkt(df['polygon'], crs='EPSG:4326').simplify(0.05).buffer(0)
+        gdf = gpd.GeoDataFrame(df, geometry=geo)
+        gdf['color'] = gdf['color'].astype(str)
+        gdf['locations'] = gdf.index
+        opts = {
+            'locations' : 'locations',
+            'color' : "color",
+            'color_discrete_sequence' : px.colors.qualitative.T10,
+            'mapbox_style' : 'carto-positron',
+            'opacity' : .4,
+            'center' : {'lat': 31.3, 'lon': -100.15},
+            'hover_data' : {'color':False, 'plan': False, 'locations':False,
+                            'cd': True, 'total_pop': True, 'polsby_popper': True}
+        }
+
+        if animate:
+            opts['zoom'] = 4.0; opts['width'] = 120 * opts['zoom']; opts['height'] = 1.065 * opts['width']
+            X = gdf.query(f'plan <= {num_steps}')
+            fig = px.choropleth_mapbox(X, geojson=X.geometry, **opts, animation_frame='plan', animation_group=X[district_type])
+            fig.update_geos(fitbounds="locations", visible=False)
+            fig.update(layout_showlegend=False)
+            fig.write_html(root_path / 'images/recomb.html', auto_play=False)#, include_plotlyjs=True)
+            fig.show()
+        else:
+            opts['zoom'] = 4.0; opts['width'] = 145 * opts['zoom']; opts['height'] = 1.065 * opts['width']
+            for k in range(num_steps+1):
+                print(k)
+                X = gdf.query(f'plan == {k}')
+                fig = px.choropleth_mapbox(X, geojson=X.geometry, **opts)
+                fig.update_geos(fitbounds="locations", visible=False)
+                fig.update(layout_showlegend=False)
+                fig.write_html(root_path / f'images/html/recomb_{str(k).rjust(2,"0")}.html')
+                fig.write_image(root_path / f'images/png/recomb_{str(k).rjust(2,"0")}.png')
