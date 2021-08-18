@@ -10,7 +10,9 @@ class Graph(Variable):
 
 
     def get(self):
-        print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level} {self.district_type}".ljust(33, ' '), end=concat_str)
+        self.tbl += f'_{self.district_type}'
+        exists = super().get()
+
         try:
             self.graph
             print(f'graph exists', end=concat_str)
@@ -23,7 +25,6 @@ class Graph(Variable):
                 self.process()
                 self.gpickle.parent.mkdir(parents=True, exist_ok=True)
                 nx.write_gpickle(self.graph, self.gpickle)
-        
         return self
     
 
@@ -95,9 +96,8 @@ from (
         recom_found = False
 #         R = rng.permutation(np.array([(d0, d1, n0, n1) for d0, n0 in districts.tuple for d1, n1 in districts.tuple if d0 < d1], dtype=object))
 #         for d0, d1, n0, n1 in R:
-        q = districts.pops.sort_values().index
-        for d0 in q:
-            for d1 in reversed(q):
+        for d0 in districts.pops.copy().sort_values().index:
+            for d1 in districts.pops.copy().sort_values(ascending=False).index:
                 if d0 == d1:
                     continue
                 m = list(districts.dict[d0]+districts.dict[d1])
@@ -114,7 +114,7 @@ from (
                 q = p0 + p1
                 P_min, P_max = P.min(), P.max()
                 trees = []
-                for i in range(100):
+                for i in range(200):
                     w = {e: rng.uniform() for e in H.edges}
                     nx.set_edge_attributes(H, w, "weight")
                     T = nx.minimum_spanning_tree(H)
@@ -126,8 +126,6 @@ from (
                         max_tries = max(100, int(0.02 * len(B)))
                         for e, cent in B[:max_tries]:
                             T.remove_edge(*e)
-    #                         comp = nx.connected_components(T)
-    #                         print(len(list(comp)))
                             comp = nx.connected_components(T)                
                             next(comp)
                             s = sum(T.nodes[n]['total_pop'] for n in next(comp))

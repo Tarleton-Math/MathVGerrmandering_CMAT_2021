@@ -18,7 +18,6 @@ class Variable(Base):
         self.raw    = f'{bq_dataset}.{b}_raw'
         self.tbl    = f'{bq_dataset}.{c}'
         self.gpickle = self.path / f'{d}.gpickle'
-
         self.get()
         print(f'success')
 #         delete_table(self.raw)
@@ -40,7 +39,6 @@ class Variable(Base):
 
 
     def get(self):
-#         print(f"Get {self.name} {self.state.abbr} {self.yr} {self.level}".ljust(33, ' '), end=concat_str)
         print(f"Get {self.tbl.split('.')[-1]}".ljust(33, ' '), end=concat_str)
         if self.name in self.g.refresh_tbl:
             delete_table(self.tbl)
@@ -51,7 +49,6 @@ class Variable(Base):
             shutil.rmtree(self.path, ignore_errors=True)
     
         exists = dict()
-        
         exists['df'] = hasattr(self, 'df')
         if exists['df']:
             print(f'dataframe exists', end=concat_str)

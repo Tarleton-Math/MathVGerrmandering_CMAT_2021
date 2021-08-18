@@ -11,6 +11,7 @@ class Combined(Variable):
 
     def get(self):
         self.tbl += f'_{self.district_type}'
+
         self.A = self.g.assignments
         self.A.cols = Levels + District_types
         self.S = self.g.shapes
@@ -22,7 +23,7 @@ class Combined(Variable):
         self.V.cols = [f'{e}_all' for e in E]
         self.H = self.g.votes_hl
         self.H.cols = [f'{e}_hl' for e in E]
-        
+
         exists = super().get()
         if not exists['tbl']:
             if not exists['raw']:
@@ -84,22 +85,20 @@ from
             query = f"""
 select
     geoid,
-    case when A=B then cnty else {self.level} end as {self.level}
+    case when ct=1 then cnty else {self.level} end as {self.level}
 from (
     select
         geoid,
         cnty,
         cntyvtd,
-        max({self.district_type}) over (partition by cnty) as A,
-        min({self.district_type}) over (partition by cnty) as B
+        count(distinct {self.district_type}) over (partition by cnty) as ct,
     from
         {self.g.assignments.tbl}
     )
 """
-        
         load_table(assign_tbl, query=query, preview_rows=0)
         self.agg(agg_tbl=assign_tbl, agg_col=self.level, out_tbl=self.tbl, agg_district=True, agg_polygon=True, agg_point=True, simplification=self.simplification, clr_tbl=None)
-        delete_table(assign_tbl)
+#         delete_table(assign_tbl)
 
         
         
