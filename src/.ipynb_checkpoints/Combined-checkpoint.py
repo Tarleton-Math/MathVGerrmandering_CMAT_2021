@@ -217,7 +217,7 @@ on
 ######## agg shapes ###################################
 #######################################################
         if not agg_polygon:
-            msg += ' with polygons'
+            msg += ' without polygons'
             query = f"""
 select
     E.*,
