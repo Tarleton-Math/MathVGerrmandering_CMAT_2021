@@ -109,7 +109,7 @@ class Gerry(Base):
         for k, col, tbl in self.steps:
             if start <= k and k <= stop:
                 print(f"Post-processing {col} to make {tbl}", end=concat_str)
-                self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=tbl, agg_district=True, agg_polygon=k in listify(agg_polygon_steps), agg_point=False, clr_tbl=self.districts.tbl, simplification=self.simplification)
+                self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=tbl, agg_district=False, agg_polygon=k in listify(agg_polygon_steps), agg_point=False, clr_tbl=self.districts.tbl, simplification=self.simplification)
                 print('done')
 
 

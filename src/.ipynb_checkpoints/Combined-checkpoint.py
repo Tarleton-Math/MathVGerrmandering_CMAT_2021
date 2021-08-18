@@ -137,8 +137,6 @@ from
 group by
     1
 """
-        
-
 
 ############################################################################################
 ######## agg district by most frequent value in each column within each agg region #########
@@ -148,7 +146,7 @@ group by
             query = f"""
 select
     A.*,
-    0 as {col}
+    '0' as {col}
 from (
     {query}
     ) as A
@@ -270,74 +268,10 @@ on
     E.geoid = F.geoid
 """
 
-
 #######################################################
-######## run main_query and clean up temp tbls ########
+######## run query and clean up temp tbls ########
 #######################################################
         query += "order by geoid"
-#         print(query)
         print(msg, end=concat_str)
         load_table(out_tbl, query=query, preview_rows=0)             
         delete_table(temp_tbl)
-#         delete_table(district_tbl)
-
-#     ) as D
-
-
-#         if agg_district:
-            
-            
-            
-# #             districts = District_types
-#             districts = [self.g.district_type]
-#             print(f'aggregating {", ".join(districts)}', end=concat_str)
-#             tbls = list()
-#             c = 64
-#             for col in districts:
-#                 t = temp_tbl + f'_{col}'
-#                 tbls.append(t)
-#                 district_query = f"""
-# select
-#     geoid,
-#     {col},
-# from (
-#     select
-#         *,
-#         row_number() over (partition by geoid order by N desc) as r
-#     from (
-#         select
-#             geoid_new as geoid,
-#             {col},
-#             count(1) as N
-#         from
-#             {temp_tbl}
-#         group by
-#             geoid, {col}
-#         )
-#     )
-# where
-#     r = 1
-# """
-#                 load_table(t, query=district_query, preview_rows=0)
-# ######## create the join query as we do each col so we can run it at the end ########
-#                 c += 1
-#                 if len(tbls) <= 1:
-#                     join_query = f"""
-# select
-#     A.geoid,
-#     {join_str(1).join(districts)}
-# from
-#     {t} as A
-# """
-#                 else:
-#                     alias = chr(c)
-#                     join_query +=f"""
-# left join
-#     {t} as {alias}
-# on
-#     A.geoid = {alias}.geoid
-# """
-# ######## run join query ########
-#             load_table(district_tbl, query=join_query, preview_rows=0)
-#             for t in tbls:
-#                 delete_table(t)
