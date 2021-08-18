@@ -10,6 +10,7 @@ class Combined(Variable):
 
 
     def get(self):
+        self.tbl += f'_{self.district_type}'
         self.A = self.g.assignments
         self.A.cols = Levels + District_types
         self.S = self.g.shapes
@@ -68,7 +69,37 @@ on
 
     def process(self):
         bqclient.copy_table(self.raw, self.tbl).result()
-        self.agg(agg_tbl=self.g.assignments.tbl, agg_col=self.level, out_tbl=self.tbl, agg_district=True, agg_polygon=True, agg_point=True, simplification=self.simplification, clr_tbl=None)
+        assign_tbl = self.tbl+'_assign'
+        
+        if not self.g.county_line:
+            query = f"""
+select
+    geoid,
+    {self.level}
+from
+    {self.g.assignments.tbl}
+"""
+    
+        else:
+            query = f"""
+select
+    geoid,
+    case when A=B then cnty else {self.level} end as {self.level}
+from (
+    select
+        geoid,
+        cnty,
+        cntyvtd,
+        max({self.district_type}) over (partition by cnty) as A,
+        min({self.district_type}) over (partition by cnty) as B
+    from
+        {self.g.assignments.tbl}
+    )
+"""
+        
+        load_table(assign_tbl, query=query, preview_rows=0)
+        self.agg(agg_tbl=assign_tbl, agg_col=self.level, out_tbl=self.tbl, agg_district=True, agg_polygon=True, agg_point=True, simplification=self.simplification, clr_tbl=None)
+        delete_table(assign_tbl)
 
         
         
@@ -91,162 +122,222 @@ on
 """
         load_table(temp_tbl, query=temp_query, preview_rows=0)
 
-# ST_GEOGPOINT(-100, 31) as point,
-    
-    
-#     ST_GEOGPOINT(-100, 31) as point,
-
 #######################################################
-######## agg shapes, census, votes, and shapes ########
+######## agg census and votes########## ###############
 #######################################################
         msg = 'aggregating census, votes_all, votes_hl'
         cols = self.C.cols + self.V.cols + self.H.cols
         sels = [f'sum({c}) as {c}' for c in cols]
-        if not agg_polygon:
-            msg += ' WITHOUT polygons'
-            main_query = f"""
+        query = f"""
 select
     geoid_new as geoid,
-    0 as aland,
-    0 as perim,
-    0 as polsby_popper,
-    {join_str(1).join(sels)},
-    ST_GEOGFROMTEXT("POINT(-100.0 31.0)") as point,
-    ST_GEOGFROMTEXT("POLYGON((-100.0 31.0, -100.1 31.0, -100.0 31.1, -100.0 31.0))") as polygon
+    {join_str(1).join(sels)}
 from
     {temp_tbl}
 group by
     1
 """
+        
 
+
+############################################################################################
+######## agg district by most frequent value in each column within each agg region #########
+############################################################################################
+        col = self.g.district_type    
+        if not agg_district:
+            query = f"""
+select
+    A.*,
+    0 as {col}
+from (
+    {query}
+    ) as A
+"""
         else:
-            msg += f' WITH polygons with simplification {simplification}'
+            msg += f', {col}'
+            query = f"""
+select
+    A.*,
+    {col}
+from (
+    {query}
+    ) as A
+left join (
+    select
+        geoid,
+        {col}
+    from (
+        select
+            *,
+            row_number() over (partition by geoid order by N desc) as r
+        from (
+            select
+                geoid_new as geoid,
+                {col},
+                count(1) as N
+            from
+                {temp_tbl}
+            group by
+                geoid, {col}
+            )
+        )
+    where
+        r = 1
+    ) as B
+on
+    A.geoid = B.geoid
+"""
+
+#######################################################
+######## join colors #################################
+#######################################################
+        if clr_tbl is None:
+            msg += f' without colors'
+            query = f"""
+select
+    C.*,
+    0 as color
+from (
+    {query}
+    ) as C
+"""
+        else:
+            msg += f' with colors'
+            query = f"""
+select
+    C.*,
+    D.color
+from (
+    {query}
+    ) as C
+left join
+    {clr_tbl} as D
+on
+    C.geoid = D.geoid
+"""   
+
+#######################################################
+######## agg shapes ###################################
+#######################################################
+        if not agg_polygon:
+            msg += ' with polygons'
+            query = f"""
+select
+    E.*,
+    0 as aland,
+    0 as perim,
+    0 as polsby_popper,
+    ST_GEOGFROMTEXT("POINT(-100.0 31.0)") as point,
+    ST_GEOGFROMTEXT("POLYGON((-100.0 31.0, -100.1 31.0, -100.0 31.1, -100.0 31.0))") as polygon
+from (
+    {query}
+    ) as E
+"""
+        else:
+            msg += f' with polygons with simplification {simplification}'
             if agg_point:
                 msg += ' and points'
                 sel_point = "st_centroid(polygon) as point"
             else:
                 sel_point = f'ST_GEOGFROMTEXT("POINT(-100.0 31.0)") as point'
-            main_query = f"""
+            query = f"""
 select
-    geoid,
+    E.*,
     aland,
     perim,
     case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
-    {join_str(1).join(cols)},
     {sel_point},
     st_simplify(polygon, {simplification}) as polygon
 from (
+    {query}
+    ) as E
+left join (
     select
         *,
         st_perimeter(polygon) as perim
     from (
         select
             geoid_new as geoid,
-            {join_str(3).join(sels)},
-            sum(aland) as aland,
-            st_union_agg(polygon) as polygon
+            st_union_agg(polygon) as polygon,
+            sum(aland) as aland
         from
             {temp_tbl}
         group by
             1
         )
-    )
-"""
-            
-############################################################################################
-######## agg districts by most frequent value in each column within each agg region ########
-######## must do this one column at a time, then join ######################################
-############################################################################################
-        district_tbl = temp_tbl + '_district'    
-        if agg_district:
-            print(f'aggregating {", ".join(District_types)}', end=concat_str)
-            tbls = list()
-            c = 64
-            for col in District_types:
-                t = temp_tbl + f'_{col}'
-                tbls.append(t)
-                district_query = f"""
-select
-    geoid,
-    {col},
-from (
-    select
-        *,
-        row_number() over (partition by geoid order by N desc) as r
-    from (
-        select
-            geoid_new as geoid,
-            {col},
-            count(1) as N
-        from
-            {temp_tbl}
-        group by
-            geoid, {col}
-        )
-    )
-where
-    r = 1
-"""
-                load_table(t, query=district_query, preview_rows=0)
-######## create the join query as we do each col so we can run it at the end ########
-                c += 1
-                if len(tbls) <= 1:
-                    join_query = f"""
-select
-    A.geoid,
-    {join_str(1).join(District_types)}
-from
-    {t} as A
-"""
-                else:
-                    alias = chr(c)
-                    join_query +=f"""
-left join
-    {t} as {alias}
+    ) as F
 on
-    A.geoid = {alias}.geoid
+    E.geoid = F.geoid
 """
-######## run join query ########
-            load_table(district_tbl, query=join_query, preview_rows=0)
-            for t in tbls:
-                delete_table(t)
 
-######## insert join into main query ########
-            main_query = f"""
-select
-    A.*,
-    {join_str(1).join(District_types)}
-from (
-    {main_query}
-    ) as A
-left join
-    {district_tbl} as B
-on
-    A.geoid = B.geoid
-"""
-        
-#############################
-######## join colors ########
-#############################
-        if clr_tbl is not None:
-            msg += f' with colors'
-            main_query = f"""
-select
-    A.*,
-    B.color
-from (
-    {main_query}
-    ) as A
-left join
-    {clr_tbl} as B
-on
-    A.geoid = B.geoid
-"""
-        
+
 #######################################################
 ######## run main_query and clean up temp tbls ########
 #######################################################
+        query += "order by geoid"
+#         print(query)
         print(msg, end=concat_str)
-        load_table(out_tbl, query=main_query, preview_rows=0)             
+        load_table(out_tbl, query=query, preview_rows=0)             
         delete_table(temp_tbl)
-        delete_table(district_tbl)
+#         delete_table(district_tbl)
+
+#     ) as D
+
+
+#         if agg_district:
+            
+            
+            
+# #             districts = District_types
+#             districts = [self.g.district_type]
+#             print(f'aggregating {", ".join(districts)}', end=concat_str)
+#             tbls = list()
+#             c = 64
+#             for col in districts:
+#                 t = temp_tbl + f'_{col}'
+#                 tbls.append(t)
+#                 district_query = f"""
+# select
+#     geoid,
+#     {col},
+# from (
+#     select
+#         *,
+#         row_number() over (partition by geoid order by N desc) as r
+#     from (
+#         select
+#             geoid_new as geoid,
+#             {col},
+#             count(1) as N
+#         from
+#             {temp_tbl}
+#         group by
+#             geoid, {col}
+#         )
+#     )
+# where
+#     r = 1
+# """
+#                 load_table(t, query=district_query, preview_rows=0)
+# ######## create the join query as we do each col so we can run it at the end ########
+#                 c += 1
+#                 if len(tbls) <= 1:
+#                     join_query = f"""
+# select
+#     A.geoid,
+#     {join_str(1).join(districts)}
+# from
+#     {t} as A
+# """
+#                 else:
+#                     alias = chr(c)
+#                     join_query +=f"""
+# left join
+#     {t} as {alias}
+# on
+#     A.geoid = {alias}.geoid
+# """
+# ######## run join query ########
+#             load_table(district_tbl, query=join_query, preview_rows=0)
+#             for t in tbls:
+#                 delete_table(t)

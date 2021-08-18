@@ -5,7 +5,7 @@ class Nodes(Variable):
     def __post_init__(self):
         self.yr = self.g.shapes_yr
         self.level = self.g.level
-        self.attrs = ['geoid'] + listify(self.g.node_attrs) + listify(District_types)
+        self.attrs = ['geoid', self.g.district_type] + listify(self.g.node_attrs)
         super().__post_init__()
 
 

@@ -3,6 +3,7 @@ class Gerry(Base):
     # These are default values that can be overridden when you create the object
     abbr              : str = 'TX'
     level             : str = 'tract'
+    county_line       : bool = True
     shapes_yr         : int = 2020
     census_yr         : int = 2020
     district_type     : str = 'cd'
@@ -24,10 +25,10 @@ class Gerry(Base):
         check_year(self.shapes_yr)
         self.state = states[states['abbr']==self.abbr].iloc[0]
         self.__dict__.update(self.state)
+        self.tbl = f'{bq_dataset}.{user_name}_plans_{self.state.abbr}_{self.census_yr}_{self.level}_{self.district_type}'
         self.get_data()
 
     def get_data(self):
-        self.tbl = f'{bq_dataset}.{user_name}_plans_{self.state.abbr}_{self.census_yr}_{self.level}_{self.district_type}'
         self.crosswalks    = Crosswalks(g=self)
         self.assignments   = Assignments(g=self)
         self.shapes        = Shapes(g=self)
@@ -36,76 +37,79 @@ class Gerry(Base):
         self.votes_all     = Votes(g=self, group='all')
         self.votes_hl      = Votes(g=self, group='hl')
         self.combined      = Combined(g=self, simplification=0)
-#         self.combined_simp = Combined(g=self, simplification=self.simplification, name='combined_simp')
-        self.edges       = Edges(g=self)
         self.nodes         = Nodes(g=self)
+        self.edges         = Edges(g=self)
         self.graph         = Graph(g=self)
         self.districts     = Districts(g=self)
-
 
     def get_components(self, G=None):
         if G is None:
             G = self.graph.graph
         return sorted([tuple(c) for c in nx.connected_components(G)], key=lambda x:len(x), reverse=True)
 
-        
     def get_colors(self, G=None):
         if G is None:
             G = self.graph.graph
         k = max([d for n, d in G.degree]) + 1
         return pd.Series(nx.equitable_color(G, k)) + 1
     
-    
-    
-
         
-    def MCMC(self, steps=10):
-        d = len(str(steps))
+    def MCMC(self, num_steps=0):
+        d = len(str(num_steps))
         f = lambda k: f"plan_{str(k).rjust(d, '0')}"
         g = lambda k: self.nodes.df[self.districts.name].copy().astype(str).rename(f(k))
-        self.steps    = [[k, f(k), self.tbl+'_'+f(k)] for k in range(steps+1)]
-        self.plans   = [g(0)]
-        self.hashes  = [self.districts.hash]
-        self.stats   = [self.districts.stats.copy()]
-        self.summary = [self.districts.summary.copy()]
-        for k, col, tbl in self.steps:
-            if k == 0:
-                continue
-            print(f"MCMC {col}", end=concat_str)
-            while True:
-                if self.graph.recomb():
-                    self.districts.update()
-                    self.districts.stats  ['plan'] = k
-                    self.districts.summary['plan'] = k
-                    
-                    print(self.districts.hash, end=concat_str)
-                    self.plans.append(g(k))
-                    self.hashes.append(self.districts.hash)
-                    self.stats.append(self.districts.stats.copy())
-                    self.summary.append(self.districts.summary.copy())
-                    print('success')
-                    break
-                else:
-                    print(f"No suitable recomb found at {col} - trying again")
-                
-        print('MCMC done')
-        self.plans = pd.concat(self.plans, axis=1)
-        load_table(tbl=self.tbl, df=self.plans.reset_index(), preview_rows=0)
-        
-        self.stats = pd.concat(self.stats, axis=0).reset_index()
-        cols = self.stats.columns.to_list()
-        cols[0], cols[1] = cols[1], cols[0]
-        load_table(tbl=self.tbl+'_stats', df=self.stats[cols], preview_rows=0)
-        
-        self.summary = pd.DataFrame.from_dict(self.summary).set_index('plan')
-        load_table(tbl=self.tbl+'_summary', df=self.summary.reset_index(), preview_rows=0)
+        self.steps    = [[k, f(k), self.tbl+'_'+f(k)] for k in range(num_steps+1)]
+
+        if num_steps > 0:
+            self.plans   = [g(0)]
+            self.hashes  = [self.districts.hash]
+            self.stats   = [self.districts.stats.copy()]
+            self.summary = [self.districts.summary.copy()]
+            for k, col, tbl in self.steps:
+                if k == 0:
+                    continue
+                print(f"MCMC {col}", end=concat_str)
+                while True:
+                    if self.graph.recomb():
+                        self.districts.update()
+                        self.districts.stats  ['plan'] = k
+                        self.districts.summary['plan'] = k
+
+                        print(self.districts.hash, end=concat_str)
+                        self.plans.append(g(k))
+                        self.hashes.append(self.districts.hash)
+                        self.stats.append(self.districts.stats.copy())
+                        self.summary.append(self.districts.summary.copy())
+                        print('success')
+                        break
+                    else:
+                        print(f"No suitable recomb found at {col} - trying again")
+
+            print('MCMC done')
+            self.plans = pd.concat(self.plans, axis=1)
+            load_table(tbl=self.tbl, df=self.plans.reset_index(), preview_rows=0)
+
+            self.stats = pd.concat(self.stats, axis=0).reset_index()
+            cols = self.stats.columns.to_list()
+            cols[0], cols[1] = cols[1], cols[0]
+            load_table(tbl=self.tbl+'_stats', df=self.stats[cols], preview_rows=0)
+
+            self.summary = pd.DataFrame.from_dict(self.summary).set_index('plan')
+            load_table(tbl=self.tbl+'_summary', df=self.summary.reset_index(), preview_rows=0)
 
 
-    def agg_plans(self, start=0, stop=999999, agg_polygon_steps=tuple()):
+    def agg_plans(self, start=0, stop=999999, agg_polygon_steps=True):
+        if agg_polygon_steps is True:
+            agg_polygon_steps = [k for k, col, tbl in self.steps]
+        elif agg_polygon_steps is False:
+            agg_polygon_steps = []
+        else:
+            agg_polygon_steps = listify(agg_polygon_steps)
+        
         for k, col, tbl in self.steps:
             if start <= k and k <= stop:
                 print(f"Post-processing {col} to make {tbl}", end=concat_str)
-                self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=tbl, agg_district=False, agg_polygon=k in listify(agg_polygon_steps), agg_point=False, clr_tbl=self.districts.tbl, simplification=self.simplification)
+                self.combined.agg(agg_tbl=self.tbl, agg_col=col, out_tbl=tbl, agg_district=True, agg_polygon=k in listify(agg_polygon_steps), agg_point=False, clr_tbl=self.districts.tbl, simplification=self.simplification)
                 print('done')
 
 
