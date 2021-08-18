@@ -13,11 +13,11 @@ import warnings
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
 warnings.filterwarnings('ignore', message='.*Pyarrow could not determine the type of columns*')
 
-user_name = 'cook'
+default_user_name = 'cook'
+user_name = input(f'user_name (default={default_user_name})')
+if user_name == '':
+    user_name = default_user_name
 
-# user_name = input('user_name (default=cook)')
-# if user_name == '':
-#     user_name = 'cook'
 default_random_seed = 1
 random_seed = input(f'random_seed (default={default_random_seed})')
 try:
