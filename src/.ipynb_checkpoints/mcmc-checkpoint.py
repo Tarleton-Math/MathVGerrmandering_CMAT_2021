@@ -1,49 +1,41 @@
 from . import *
 
-default_user_name = 'cook'
-default_random_seed = 1
-# u = input(f'user_name (default={default_user_name})')
-# r = input(f'random_seed (default={default_random_seed})')
-
-try:
-    assert len(u) > 0
-    user_name = u
-except:
-    user_name = default_user_name
-
-try:
-    random_seed = int(r)
-    rng = np.random.default_rng(random_seed)
-except:
-    random_seed = default_random_seed
-    rng = np.random.default_rng(random_seed)
-    
 @dataclasses.dataclass
 class MCMC(Base):
-    gpickle           : str
-    district_type     : str
-    num_steps         : int = 2
-    num_colors        : int = 10
-    pop_imbalance_tol : float = 10.0
+    gpickle            : str
+    district_type      : str
+    num_steps          : int
+    user_name          : str
+    random_seed        : int = 1
+    num_colors         : int = 10
+    pop_imbalance_tol  : float = 10.0
+    pop_imbalance_stop : bool = False
+    new_districts      : int = 0
 
     def __post_init__(self):
+        self.rng = np.random.default_rng(int(self.random_seed))
+        self.gpickle = pathlib.Path(self.gpickle)
         a = self.gpickle.stem.split('_')
-        a[0] = user_name
-        b = '_'.join(a)
-        self.tbl = f'{bq_dataset}.{b}'
+        b = '_'.join(a[1:])
+        timestamp = str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_')
+        self.tbl = f'{proj_id}.redistricting_results_{self.user_name}.{b}_{timestamp}'
         self.graph = nx.read_gpickle(self.gpickle)
+        self.gpickle_out = f'{str(self.gpickle)[:-8]}_{timestamp}.gpickle'
         
-        P = pd.Series(dict(self.graph.nodes(data='total_pop'))).nlargest(2).index
-        self.graph.nodes[P[0]][self.district_type] = '37'
-        self.graph.nodes[P[1]][self.district_type] = '38'
+        
+        if self.new_districts > 0:
+            P = pd.Series(dict(self.graph.nodes(data='total_pop'))).nlargest(self.new_districts).index
+            M = max(int(x) for n, x in self.graph.nodes(data=self.district_type))
+            for i in range(self.new_districts):
+                M += 1
+                self.graph.nodes[P[i]][self.district_type] = str(M)
 
         self.plan = 0
         self.get_colors()
         self.num_districts = len(self.districts)
         self.pop_total = self.sum_nodes(self.graph, 'total_pop')
         self.pop_ideal = self.pop_total / self.num_districts
-        
-#         self.steps = [[k, self.col_name(k)] for k in range(self.num_steps+1)]
+
         
     def get_districts(self):
         D = {}
@@ -112,6 +104,10 @@ class MCMC(Base):
                     break
                 else:
                     print(f"No suitable recomb found at {col} - trying again")
+                    continue
+            if self.pop_imbalance_stop and self.pop_imbalance < self.pop_imbalance_tol:
+                rpt(f'pop_imbalance_tol {self.pop_imbalance_tol} satisfied - stopping')
+                break
         print('MCMC done')
 
         self.plans = pd.concat(self.plans, axis=0).rename_axis('geoid')
@@ -121,13 +117,14 @@ class MCMC(Base):
         load_table(tbl=self.tbl+'_plans'  , df=self.plans.reset_index()  , preview_rows=0)
         load_table(tbl=self.tbl+'_stats'  , df=self.stats.reset_index()  , preview_rows=0)
         load_table(tbl=self.tbl+'_summary', df=self.summaries, preview_rows=0)
+        nx.write_gpickle(self.graph, self.gpickle_out)
+        
         
     def recomb(self):
-        P = self.stat['total_pop'].copy().sort_values()
-        L = P.index
+        L = self.stat['total_pop'].copy().sort_values().index
         if self.pop_imbalance < self.pop_imbalance_tol:
             tol = districts.pop_imbalance_tol
-            pairs = rng.permutation([(a, b) for a in L for b in L if a<b])
+            pairs = self.rng.permutation([(a, b) for a in L for b in L if a<b])
         else:
             print(f'pushing', end=concat_str)
             tol = self.pop_imbalance + 0.01
@@ -144,6 +141,7 @@ class MCMC(Base):
                 continue
 #                 else:
 #                     print(f'{d0},{d1} connected', end=concat_str)
+            P = self.stat['total_pop'].copy()
             p0 = P.pop(d0)
             p1 = P.pop(d1)
             q = p0 + p1
@@ -153,7 +151,7 @@ class MCMC(Base):
 
             trees = []  # track which spanning trees we've tried so we don't repeat failures
             for i in range(100):  # max number of spanning trees to try
-                w = {e: rng.uniform() for e in H.edges}  # assign random weight to edges
+                w = {e: self.rng.uniform() for e in H.edges}  # assign random weight to edges
                 nx.set_edge_attributes(H, w, "weight")
                 T = nx.minimum_spanning_tree(H)  # find minimum spanning tree - we assiged random weights so this is really a random spanning tress
                 h = hash(tuple(sorted(T.edges)))  # hash tree for comparion
@@ -200,7 +198,7 @@ class MCMC(Base):
                             # update districts
                             self.get_districts()
                             if self.hash in self.hashes: # if we've already seen that plan before, reject and keep trying for a new one
-                                print(f'duplicate plan {self.hash}', end=concat_str)
+#                                 print(f'duplicate plan {self.hash}', end=concat_str)
                                 T.add_edge(*e)
                                 # Restore old district labels
                                 for n in H.nodes:
