@@ -9,7 +9,7 @@ class Elections(Variable):
 
 
     def get(self):
-        if self.state.abbr != 'TX':
+        if self.g.state.abbr != 'TX':
             print(f'elections only implemented for TX')
             return
 
@@ -28,33 +28,22 @@ class Elections(Variable):
 
         
     def process_raw(self):
-######## Most races have 2 files with the extensions below - merge horizontally ########
-######## Then stack vertically into single dataframe ########
-        ext = ['_Returns.csv', '_VRTO.csv']
-        k = len(ext[0])
-        files = [fn[:-k] for fn in self.zipfile.namelist() if fn[-k:]==ext[0]]
+        ext = '_Returns.csv'
+        k = len(ext)
         L = []
-        for fn in files:
-            msg = fn.ljust(50, ' ')
-            try:
-                A = extract_file(self.zipfile, fn+ext[0], sep=',')
-                B = extract_file(self.zipfile, fn+ext[1], sep=',')
-                df = A.merge(B, on='cntyvtd', suffixes=(None,'_y'))
-                df = (df.drop(columns=[c for c in df.columns if c[-2:]=='_y'])
-                      .query("party in ['R', 'D', 'L', 'G']")
-                      .astype({'votes':int, 'fips':str, 'vtd':str})
+        for fn in self.zipfile.namelist():
+            if fn[-k:]==ext:
+                rpt(fn)
+                df = extract_file(self.zipfile, fn, sep=',')
+                df = (df.astype({'votes':int, 'fips':str, 'vtd':str})
                       .query('votes > 0')
+                      .query("party in ['R', 'D', 'L', 'G']")
                      )
                 w = fn.lower().split('_')
                 df['election_yr'] = int(w[0])
-                df['race'] = "_".join(w[1:-1])
+                df['race'] = "_".join(w[1:-2])
                 L.append(df)
-                os.unlink(fn+ext[0])
-                os.unlink(fn+ext[1])
-#                 print(msg+'success')
-            except:  # ignore races which don't have both files
-#                 print(msg+'fail')
-                pass
+                os.unlink(fn)
         
 ######## vertically stack then clean so that joins work correctly later ########
         df = pd.concat(L, axis=0, ignore_index=True).reset_index(drop=True)
@@ -81,9 +70,7 @@ class Elections(Variable):
             display(df[unmatched].sort_values('votes', ascending=False))
             raise Exception('Unmatched election results')
         
-        self.df = (df.drop(columns=['county', 'fips', 'vtd', 'incumbent', 'totalpop', 'alt'])
-                     .rename(columns={'name':'candidate', 'totalvr':'registered_voters', 'totalto':'turn_out', 'spanishsurnamepercent':'spanish_surname_pct'})
-                  )
+        self.df = df.drop(columns=['county', 'fips', 'vtd', 'incumbent', 'alt']).rename(columns={'name':'candidate'})
         self.df.to_parquet(self.pq)
         load_table(self.raw, df=self.df, preview_rows=0)
         
@@ -92,41 +79,79 @@ class Elections(Variable):
 ######## Apportion votes from cntyvtd to its tabblock proportional to population ########
 ######## We computed cntyvtd_pop_prop = pop_tabblock / pop_cntyvtd  during census processing ########
 ######## Each tabblock gets this proportion of votes cast in its cntyvtd ########
-######## Moreover, TX Legislative Council provides "spanish_surname_percent" ########
-######## We assume the same voting rate among spanish_surname and general population ########
-######## Assumes uniform voting behaviors across cntyvtd and between spanish_surname/general population ########
-######## Obviously this is a crude approximation, but I don't see a better method ########
-######## to do apportionment with the available data ########
+
         sep = ' or\n        '
         query = f"""
 select
-    *,
-    spanish_surname_prop * votes_all as votes_hl,
-    spanish_surname_prop * registered_voters_all as registered_voters_hl,
-    spanish_surname_prop * turn_out_all as turn_out_hl,
-from (
-    select
-        A.geoid,
-        B.office,
-        B.election_yr,
-        B.race,
-        B.candidate,
-        B.party,
-        concat(B.office, "_", B.election_yr, "_", B.race, "_", B.party, "_", B.candidate) as election,
-        B.votes * A.cntyvtd_pop_prop as votes_all,
-        cast(B.registered_voters as int) as registered_voters_all,
-        cast(B.turn_out as int) as turn_out_all, 
-        cast(B.spanish_surname_pct as float64) / 100 as spanish_surname_prop,
-    from 
-        {self.g.census.tbl} as A
-    inner join
-        {self.raw} as B
-    on
-        A.cntyvtd = B.cntyvtd
-    where
-        {sep.join(f'({x})' for x in self.g.election_filters)}
-    )
+    A.geoid,
+    concat(B.office, "_", B.election_yr, "_", B.race, "_", B.party, "_", B.candidate) as election,
+    B.votes * A.cntyvtd_pop_prop as votes,
+from 
+    {self.g.census.tbl} as A
+inner join
+    {self.raw} as B
+on
+    A.cntyvtd = B.cntyvtd
+where
+    {sep.join(f'({x})' for x in self.g.election_filters)}
 order by
     geoid
 """
-        load_table(self.tbl, query=query, preview_rows=5)
+        tbl_temp = self.tbl + '_temp'
+        load_table(tbl_temp, query=query, preview_rows=0)
+
+######## To bring everything into one table, we must pivot from long to wide format (one row per tabblock) ########
+######## While easy in Python and Excel, this is delicate in SQl given the number of electionS and tabblocks ########
+######## Even BigQuery refuseS to pivot all elections simulatenously ########
+######## So we break the elections into chunks, pivot separately, then join horizontally ########
+        df = run_query(f"select distinct election from {tbl_temp}")
+        elections = tuple(sorted(df['election']))
+        stride = 100
+        tbl_chunks = list()
+        alias_chr = 64 # silly hack to give table aliases A, B, C, ...
+        for r in np.arange(0, len(elections), stride):
+            E = elections[r:r+stride]
+            t = f'{self.tbl}_{r}'
+            tbl_chunks.append(t)
+            query = f"""
+select
+    *
+from (
+    select
+        geoid,
+        election,
+        votes
+    from
+        {tbl_temp}
+    )
+pivot(
+    sum(votes)
+    for election in {E})
+"""
+            load_table(t, query=query, preview_rows=0)
+        
+######## create the join query as we do each chunk so we can run it at the end ########
+            alias_chr += 1
+            alias = chr(alias_chr)
+            if len(tbl_chunks) == 1:
+                query_join = f"""
+select
+    A.geoid,
+    {join_str(1).join(elections)}
+from
+    {t} as {alias}
+"""
+            else:
+                query_join += f"""
+inner join
+    {t} as {alias}
+on
+    A.geoid = {alias}.geoid
+"""
+        query_join += f"order by geoid"
+
+######## clean up ########
+        load_table(self.tbl, query=query_join, preview_rows=0)
+        delete_table(tbl_temp)
+        for t in tbl_chunks:
+            delete_table(t)

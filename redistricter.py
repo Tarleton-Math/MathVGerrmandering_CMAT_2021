@@ -1,6 +1,5 @@
 from src import *
-from src.gerry import Gerry
-from src.crosswalks import Crosswalks
+from src.graph import *
 
 refresh_all = (
 #     'crosswalks',
@@ -8,11 +7,8 @@ refresh_all = (
 #     'shapes',
 #     'census',
 #     'elections',
-#     'votes_all',
-#     'votes_hl',
-#     'combined',
-#     'edges',
 #     'nodes',
+#     'edges',
 #     'graph',
 )
 
@@ -22,39 +18,37 @@ refresh_tbl = (
 #     'shapes',
 #     'census',
 #     'elections',
-#     'votes_all',
-#     'votes_hl',
-#     'combined',
-#     'edges',
 #     'nodes',
+#     'edges',
 #     'graph',
 )
 
-self = Gerry(abbr = 'TX',
-             level = 'cntyvtd',
-             district_type='cd',
-             simplification=0,
-             num_colors=10,
-             election_filters=(
-                 "office='President' and race='general'",
-                 "office='USSen' and race='general'",
-#                  "office like 'USRep%' and race='general'",
-             ),
-             refresh_tbl=refresh_tbl, refresh_all=refresh_all,
-             num_steps=10,
-            )
+graph_opts = {
+    'abbr'          : 'TX',
+    'level'         : 'cntyvtd',
+    'district_type' : 'cd',
+    'refresh_tbl'   : refresh_tbl,
+    'refresh_all'   : refresh_all,
+    'election_filters' : (
+        "office='President' and race='general'",
+        "office='USSen' and race='general'",
+#         "office like 'USRep%' and race='general'",
+    ),
+}
+G = Graph(**graph_opts)
+gpickle = G.gpickle
+del G
 
+mcmc_opts = {
+    'num_colors'    : 10,
+    'num_steps'     : 1000,
+    'district_type' : graph_opts['district_type'],
+}
+
+from src.mcmc import *
+M = MCMC(gpickle, **mcmc_opts)
 start = time.time()
-
-idx = self.nodes.df.nlargest(2, 'total_pop').index
-self.nodes.df.loc[idx[0], 'cd'] = '37'
-self.nodes.df.loc[idx[1], 'cd'] = '38'
-
-self.MCMC()
-# self.agg_plans(agg_polygon_steps=False)
-# #                (0,10))#True)#agg_polygon_steps=list(range(3,15)))
-# self.stack_plans()
-
+M.run_chain()
 elapsed = time.time() - start
 h, m = divmod(elapsed, 3600)
 m, s = divmod(m, 60)

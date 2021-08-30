@@ -9,7 +9,7 @@ class Census(Variable):
 
 
     def get(self):
-        self.url = f"https://www2.census.gov/programs-surveys/decennial/{self.yr}/data/01-Redistricting_File--PL_94-171/{self.state.name.replace(' ', '_')}/{self.state.abbr.lower()}{self.yr}.pl.zip"
+        self.url = f"https://www2.census.gov/programs-surveys/decennial/{self.yr}/data/01-Redistricting_File--PL_94-171/{self.g.state.name.replace(' ', '_')}/{self.g.state.abbr.lower()}{self.yr}.pl.zip"
         
         exists = super().get()
         if not exists['tbl']:
@@ -123,7 +123,7 @@ select
 from 
     {self.g.assignments.tbl} as F
 inner join(
-    {query}
+    {subquery(query)}
     ) as G
 on
     F.geoid = G.geoid

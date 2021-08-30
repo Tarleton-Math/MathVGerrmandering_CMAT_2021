@@ -4,25 +4,31 @@ class Crosswalks(Variable):
     name: str = 'crosswalks'
         
     def __post_init__(self):
-        self.yr = self.g.census_yr
+        self.yr = 2010
         super().__post_init__()
 
 
     def get(self):
-        self.url = f"https://www2.census.gov/geo/docs/maps-data/data/rel{self.g.shapes_yr}/t{str(self.g.census_yr)[2:]}t{str(self.g.shapes_yr)[2:]}/TAB{self.g.census_yr}_TAB{self.g.shapes_yr}_ST{self.state.fips}.zip"
+        self.url = f"https://www2.census.gov/geo/docs/maps-data/data/rel2020/t10t20/TAB2010_TAB2020_ST{self.g.state.fips}.zip"
         exists = super().get()
-        if self.yr < 2020:
-            if not exists['tbl']:
-                self.get_zip()
-                rpt(f'creating table')
-                self.process()
-        else:
-            rpt(f'not necessary')
+        if not exists['tbl']:
+            self.get_zip()
+            rpt(f'creating table')
+            self.process()
         return self
+
+#         if self.yr < 2020:
+#             if not exists['tbl']:
+#                 self.get_zip()
+#                 rpt(f'creating table')
+#                 self.process()
+#         else:
+#             rpt(f'not necessary')
+#         return self
 
 
     def process(self):
-        yrs = [self.g.census_yr, self.g.shapes_yr]
+        yrs = [2010, 2020]
         ids = [f'geoid_{yr}' for yr in yrs]
 
         for fn in self.zipfile.namelist():

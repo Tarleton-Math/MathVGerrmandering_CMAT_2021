@@ -1,5 +1,3 @@
-default_user_name = 'cook'
-default_random_seed = 1
 proj_id = 'cmat-315920'
 root_path = '/home/jupyter'
 code_path = root_path + '/MathVGerrmandering_CMAT_2021/src/'
@@ -18,29 +16,6 @@ except:
 import warnings
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
 warnings.filterwarnings('ignore', message='.*Pyarrow could not determine the type of columns*')
-
-user_name = input(f'user_name (default={default_user_name})')
-if user_name == '':
-    user_name = default_user_name
-
-random_seed = input(f'random_seed (default={default_random_seed})')
-try:
-    rng = np.random.default_rng(int(random_seed))    
-except:
-    rng = np.random.default_rng(default_random_seed)
-
-pd.set_option('display.max_columns', None)
-cred, proj = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-bqclient   = bigquery.Client(credentials=cred, project=proj)
-root_path  = pathlib.Path(root_path)
-data_path  = root_path / 'redistricting_data'
-bq_dataset = proj_id   +'.redistricting_data'
-
-Levels = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd']
-District_types = ['cd', 'sldu', 'sldl']
-Years = [2010, 2020]
-Groups = ['all', 'hl']
-concat_str = ' ... '
 
 def rpt(msg):
     print(msg, end=concat_str, flush=True)
@@ -88,7 +63,6 @@ def listify(x):
 def extract_file(zipfile, fn, **kwargs):
     file = zipfile.extract(fn)
     return lower_cols(pd.read_csv(file, dtype=str, **kwargs))
-#     return lower(pd.read_csv(file, dtype=str, **kwargs))
 
 def check_table(tbl):
     try:
@@ -98,9 +72,7 @@ def check_table(tbl):
         return False
 
 def get_cols(tbl):
-    t = bqclient.get_table(tbl)
-    cols = [s.name for s in t.schema]
-    return cols
+    return [s.name for s in bqclient.get_table(tbl).schema if s.name.lower() != 'geoid']
     
 def run_query(query):
     res = bqclient.query(query).result()
@@ -113,8 +85,7 @@ def delete_table(tbl):
     query = f"drop table {tbl}"
     try:
         run_query(query)
-    except:
-#         rpt(f'{tbl} not found')
+    except google.api_core.exceptions.NotFound:
         pass
 
 def read_table(tbl, rows=99999999999, start=0, cols='*'):
@@ -125,9 +96,6 @@ def read_table(tbl, rows=99999999999, start=0, cols='*'):
 
 def head(tbl, rows=10):
     return read_table(tbl, rows)
-
-def get_cols(tbl):
-    return [s.name for s in bqclient.get_table(tbl).schema if s.name.lower() != 'geoid']
 
 def load_table(tbl, df=None, file=None, query=None, overwrite=True, preview_rows=0):
 #     rpt(f'loading BigQuery table {tbl}')
@@ -146,31 +114,32 @@ def load_table(tbl, df=None, file=None, query=None, overwrite=True, preview_rows
         print(head(tbl, preview_rows))
     return tbl
 
-def get_states():
-    query = f"""
-    select
-        state_fips_code as fips
-        , state_postal_abbreviation as abbr
-        , state_name as name
-    from
-        bigquery-public-data.census_utility.fips_codes_states
-    where
-        state_fips_code <= '56'
-    """
-    return lower_cols(run_query(query)).set_index('name')
-
-def yr_to_congress(yr):
-    return min(116, int(yr-1786)/2)
-
 def join_str(k=1):
     tab = '    '
     return ',\n' + k * tab
 
-try:
-    states
-except:
-    print('getting states')
-    states = get_states()
+def subquery(query, indents=1):
+    s = '\n' + indents * '    '
+    return query[1:-1].replace('\n', s)
+
+def yr_to_congress(yr):
+    return min(116, int(yr-1786)/2)
+
+def get_states():
+    query = f"""
+select
+    state_fips_code as fips
+    , state_postal_abbreviation as abbr
+    , state_name as name
+from
+    bigquery-public-data.census_utility.fips_codes_states
+where
+    state_fips_code <= '56'
+"""
+    return lower_cols(run_query(query)).set_index('name')
+
+def get_components(graph):
+    return sorted([tuple(x) for x in nx.connected_components(graph)], key=lambda x:len(x), reverse=True)
 
 
 @dataclasses.dataclass
@@ -189,9 +158,7 @@ class Variable(Base):
     level : str = 'tabblock'
 
     def __post_init__(self):
-        self.state = self.g.state
-        self.district_type = self.g.district_type
-        a = f'{self.name}/{self.state.abbr}'
+        a = f'{self.name}/{self.g.state.abbr}'
         self.path = data_path / a
         a = a.replace('/', '_')
         b = f'{a}_{self.yr}'
@@ -199,12 +166,11 @@ class Variable(Base):
         d = f'{c}_{self.g.district_type}'
         self.zip     = self.path / f'{b}.zip'
         self.pq      = self.path / f'{b}.parquet'
-        self.raw    = f'{bq_dataset}.{b}_raw'
-        self.tbl    = f'{bq_dataset}.{c}'
+        self.raw     = f'{bq_dataset}.{b}_raw'
+        self.tbl     = f'{bq_dataset}.{c}'
         self.gpickle = self.path / f'{d}.gpickle'
         self.get()
         print(f'success')
-#         delete_table(self.raw)
 
 
     def get_zip(self):
@@ -219,7 +185,7 @@ class Variable(Base):
                 self.zipfile = zf.ZipFile(urllib.request.urlretrieve(self.url, self.zip)[0])
                 rpt(f'finished{concat_str}processing')
             except urllib.error.HTTPError:
-                raise Exception(f'n\nFAILED - BAD URL\n\n')
+                raise Exception(f'n\nFAILED - BAD URL {self.url}\n\n')
 
 
     def get(self):
@@ -228,7 +194,7 @@ class Variable(Base):
             delete_table(self.tbl)
             
         if self.name in self.g.refresh_all:
-            delete_table(self.tbl)
+#             delete_table(self.tbl)
             delete_table(self.raw)
             shutil.rmtree(self.path, ignore_errors=True)
     
@@ -245,10 +211,28 @@ class Variable(Base):
             if exists['raw']:
                 rpt(f'raw table exists')
         return exists
+
+############################################################################################################
     
+pd.set_option('display.max_columns', None)
+cred, proj = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+bqclient   = bigquery.Client(credentials=cred, project=proj)
+root_path  = pathlib.Path(root_path)
+data_path  = root_path / 'redistricting_data'
+bq_dataset = proj_id   +'.redistricting_data'
+
+Levels = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd']
+District_types = ['cd', 'sldu', 'sldl']
+Years = [2010, 2020]
+concat_str = ' ... '
+
+try:
+    states
+except:
+    print('getting states')
+    states = get_states()
     
-    
-    
+
 Census_columns = {'joins':  ['fileid', 'stusab', 'chariter', 'cifsn', 'logrecno']}
 
 Census_columns['geo'] = ({'name':'fileid', 'field_type':'string'}, {'name':'stusab', 'field_type':'string'}, {'name':'sumlev', 'field_type':'string'}, {'name':'geovar', 'field_type':'string'}, {'name':'geocomp', 'field_type':'string'}, {'name':'chariter', 'field_type':'string'}, {'name':'cifsn', 'field_type':'string'}, {'name':'logrecno', 'field_type':'integer'}, {'name':'geoid', 'field_type':'string'}, {'name':'geocode', 'field_type':'string'}, {'name':'region', 'field_type':'string'}, {'name':'division', 'field_type':'string'}, {'name':'state', 'field_type':'string'}, {'name':'statens', 'field_type':'string'}, {'name':'county', 'field_type':'string'}, {'name':'countycc', 'field_type':'string'}, {'name':'countyns', 'field_type':'string'}, {'name':'cousub', 'field_type':'string'}, {'name':'cousubcc', 'field_type':'string'}, {'name':'cousubns', 'field_type':'string'}, {'name':'submcd', 'field_type':'string'}, {'name':'submcdcc', 'field_type':'string'}, {'name':'submcdns', 'field_type':'string'}, {'name':'estate', 'field_type':'string'}, {'name':'estatecc', 'field_type':'string'}, {'name':'estatens', 'field_type':'string'}, {'name':'concit', 'field_type':'string'}, {'name':'concitcc', 'field_type':'string'}, {'name':'concitns', 'field_type':'string'}, {'name':'place', 'field_type':'string'}, {'name':'placecc', 'field_type':'string'}, {'name':'placens', 'field_type':'string'}, {'name':'tract', 'field_type':'string'}, {'name':'blkgrp', 'field_type':'string'}, {'name':'block', 'field_type':'string'}, {'name':'aianhh', 'field_type':'string'}, {'name':'aihhtli', 'field_type':'string'}, {'name':'aianhhfp', 'field_type':'string'}, {'name':'aianhhcc', 'field_type':'string'}, {'name':'aianhhns', 'field_type':'string'}, {'name':'aits', 'field_type':'string'}, {'name':'aitsfp', 'field_type':'string'}, {'name':'aitscc', 'field_type':'string'}, {'name':'aitsns', 'field_type':'string'}, {'name':'ttract', 'field_type':'string'}, {'name':'tblkgrp', 'field_type':'string'}, {'name':'anrc', 'field_type':'string'}, {'name':'anrccc', 'field_type':'string'}, {'name':'anrcns', 'field_type':'string'}, {'name':'cbsa', 'field_type':'string'}, {'name':'memi', 'field_type':'string'}, {'name':'csa', 'field_type':'string'}, {'name':'metdiv', 'field_type':'string'}, {'name':'necta', 'field_type':'string'}, {'name':'nmemi', 'field_type':'string'}, {'name':'cnecta', 'field_type':'string'}, {'name':'nectadiv', 'field_type':'string'}, {'name':'cbsapci', 'field_type':'string'}, {'name':'nectapci', 'field_type':'string'}, {'name':'ua', 'field_type':'string'}, {'name':'uatype', 'field_type':'string'}, {'name':'ur', 'field_type':'string'}, {'name':'cd116', 'field_type':'string'}, {'name':'cd118', 'field_type':'string'}, {'name':'cd119', 'field_type':'string'}, {'name':'cd120', 'field_type':'string'}, {'name':'cd121', 'field_type':'string'}, {'name':'sldu18', 'field_type':'string'}, {'name':'sldu22', 'field_type':'string'}, {'name':'sldu24', 'field_type':'string'}, {'name':'sldu26', 'field_type':'string'}, {'name':'sldu28', 'field_type':'string'}, {'name':'sldl18', 'field_type':'string'}, {'name':'sldl22', 'field_type':'string'}, {'name':'sldl24', 'field_type':'string'}, {'name':'sldl26', 'field_type':'string'}, {'name':'sldl28', 'field_type':'string'}, {'name':'vtd', 'field_type':'string'}, {'name':'vtdi', 'field_type':'string'}, {'name':'zcta', 'field_type':'string'}, {'name':'sdelm', 'field_type':'string'}, {'name':'sdsec', 'field_type':'string'}, {'name':'sduni', 'field_type':'string'}, {'name':'puma', 'field_type':'string'}, {'name':'arealand', 'field_type':'string'}, {'name':'areawatr', 'field_type':'string'}, {'name':'basename', 'field_type':'string'}, {'name':'name', 'field_type':'string'}, {'name':'funcstat', 'field_type':'string'}, {'name':'gcuni', 'field_type':'string'}, {'name':'pop100', 'field_type':'string'}, {'name':'hu100', 'field_type':'string'}, {'name':'intptlat', 'field_type':'string'}, {'name':'intptlon', 'field_type':'string'}, {'name':'lsadc', 'field_type':'string'}, {'name':'partflag', 'field_type':'string'}, {'name':'uga', 'field_type':'string'})
