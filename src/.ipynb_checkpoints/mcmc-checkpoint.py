@@ -4,7 +4,7 @@ from . import *
 class MCMC(Base):
     gpickle            : str
     district_type      : str
-    num_steps          : int
+    max_steps          : int
     user_name          : str
     random_seed        : int = 1
     num_colors         : int = 10
@@ -15,6 +15,7 @@ class MCMC(Base):
     def __post_init__(self):
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
+        
         self.gpickle = pathlib.Path(self.gpickle)
         a = self.gpickle.stem.split('_')
         b = '_'.join(a[1:])
@@ -24,40 +25,44 @@ class MCMC(Base):
         self.graph = nx.read_gpickle(self.gpickle)
         self.gpickle_out = f'{str(self.gpickle)[:-8]}_{label}.gpickle'
         
-        
         if self.new_districts > 0:
-            P = pd.Series(dict(self.graph.nodes(data='total_pop'))).nlargest(self.new_districts).index
-            M = max(int(x) for n, x in self.graph.nodes(data=self.district_type))
-            for i in range(self.new_districts):
+            M = int(self.nodes_df()[self.district_type].max())
+            for n in self.nodes_df().nlargest(self.new_districts, 'total_pop').index:
                 M += 1
-                self.graph.nodes[P[i]][self.district_type] = str(M)
-
+                self.graph.nodes[n][self.district_type] = str(M)
         self.plan = 0
-        self.get_colors()
+        self.get_districts()
+#         self.get_colors()
         self.num_districts = len(self.districts)
         self.pop_total = self.sum_nodes(self.graph, 'total_pop')
         self.pop_ideal = self.pop_total / self.num_districts
 
+    def nodes_df(self, G=None):
+        if G is None:
+            G = self.graph
+        return pd.DataFrame.from_dict(G.nodes, orient='index')
         
-    def get_districts(self):
-        D = {}
-        for n, d in self.graph.nodes(data=self.district_type):
-            D.setdefault(d, set()).add(n)
-        self.districts = {d: tuple(sorted(D[d])) for d in sorted(D.keys())}
-        tup = tuple(sorted(self.districts.values()))
-        self.hash  = hash(tup)
+    def edges_tuple(self, G=None):
+        if G is None:
+            G = self.graph
+        return tuple(sorted(tuple((min(u,v), max(u,v)) for u, v in G.edges)))
     
-    def get_colors(self):
-        self.get_districts()
-        H = nx.Graph()
-        for i, N in self.districts.items():
-            for j, M in self.districts.items():
-                if i < j:
-                    if len(nx.node_boundary(self.graph, N, M)) > 0:
-                        H.add_edge(i, j)
-        k = max([d for n, d in H.degree]) + 1
-        self.colors = nx.equitable_color(H, k)
-#         return pd.Series(nx.equitable_color(H, k)) + 1
+    def get_districts(self):
+        grp = self.nodes_df().groupby('cd')
+        self.districts = {k:tuple(sorted(v)) for k,v in grp.groups.items()}
+        self.partition = tuple(sorted(self.districts.values())).__hash__()
+
+#     def get_colors(self):
+#         self.get_districts()
+#         H = nx.Graph()
+#         for i, N in self.districts.items():
+#             for j, M in self.districts.items():
+#                 if i < j:
+#                     if len(nx.node_boundary(self.graph, N, M)) > 0:
+#                         H.add_edge(i, j)
+#         k = max([d for n, d in H.degree]) + 1
+#         self.colors = nx.equitable_color(H, k)
+# #         return pd.Series(nx.equitable_color(H, k)) + 1
 
     def sum_nodes(self, G, attr='total_pop'):
         return sum(x for n, x in G.nodes(data=attr))
@@ -87,29 +92,29 @@ class MCMC(Base):
     def run_chain(self):
         nx.set_node_attributes(self.graph, self.plan, 'plan')
         self.get_stats()
-        self.plans     = [pd.DataFrame.from_dict(dict(self.graph.nodes(data=True)), orient='index')[['plan', 'cd']]]
-        self.stats     = [self.stat.copy()]
-        self.summaries = [self.summary.copy()]
-        self.hashes    = [self.hash]
-        for k in range(1, self.num_steps+1):
-            rpt(f"MCMC {k}")
+        self.plans      = [self.nodes_df()[['plan', self.district_type]]]
+        self.stats      = [self.stat.copy()]
+        self.summaries  = [self.summary.copy()]
+        self.partitions = [self.partition]
+        for k in range(1, self.max_steps+1):
+#             rpt(f"MCMC {k}")
             self.plan += 1
             nx.set_node_attributes(self.graph, self.plan, 'plan')
             while True:
                 if self.recomb():
-                    self.plans.append(pd.DataFrame.from_dict(dict(self.graph.nodes(data=True)), orient='index')[['plan', 'cd']])
+                    self.plans.append(self.nodes_df()[['plan', self.district_type]])
                     self.stats.append(self.stat.copy())
                     self.summaries.append(self.summary.copy())
-                    self.hashes.append(self.hash)
-                    print('success')
+                    self.partitions.append(self.partition)
+#                     print('success')
                     break
                 else:
-                    print(f"No suitable recomb found at {col} - trying again")
+#                     print(f"No suitable recomb found at {col} - trying again")
                     continue
             if self.pop_imbalance_stop and self.pop_imbalance < self.pop_imbalance_tol:
-                rpt(f'pop_imbalance_tol {self.pop_imbalance_tol} satisfied - stopping')
+#                 rpt(f'pop_imbalance_tol {self.pop_imbalance_tol} satisfied - stopping')
                 break
-        print('MCMC done')
+#         print('MCMC done')
 
         self.plans = pd.concat(self.plans, axis=0).rename_axis('geoid')
         self.stats = pd.concat(self.stats, axis=0).rename_axis('geoid')
@@ -123,16 +128,16 @@ class MCMC(Base):
         
     def recomb(self):
         self.get_stats()
-        L = self.stat['total_pop'].copy().sort_values().index
+        L = self.stat['total_pop'].sort_values().index.copy()
         if self.pop_imbalance < self.pop_imbalance_tol:
             tol = self.pop_imbalance_tol
             pairs = self.rng.permutation([(a, b) for a in L for b in L if a<b])
         else:
-            print(f'pushing', end=concat_str)
+#             print(f'pushing', end=concat_str)
             tol = self.pop_imbalance + 0.01
             k = int(len(L) / 2)
             pairs = [(d0, d1) for d0 in L[:k] for d1 in L[k:][::-1]]
-        print(f'pop_imbalance={self.pop_imbalance:.2f}{concat_str}setting tol={tol:.2f}%', end=concat_str)
+#         print(f'pop_imbalance={self.pop_imbalance:.2f}{concat_str}setting tol={tol:.2f}%', end=concat_str)
         
         recom_found = False
         for d0, d1 in pairs:
@@ -153,10 +158,10 @@ class MCMC(Base):
 
             trees = []  # track which spanning trees we've tried so we don't repeat failures
             for i in range(100):  # max number of spanning trees to try
-                w = {e: self.rng.uniform() for e in H.edges}  # assign random weight to edges
-                nx.set_edge_attributes(H, w, "weight")
+                for e in self.edges_tuple(H):
+                    H.edges[e]['weight'] = self.rng.uniform()
                 T = nx.minimum_spanning_tree(H)  # find minimum spanning tree - we assiged random weights so this is really a random spanning tress
-                h = hash(tuple(sorted(T.edges)))  # hash tree for comparion
+                h = self.edges_tuple(T).__hash__()  # hash tree for comparion
                 if h not in trees:  # prevents retrying a previously failed treee
                     trees.append(h)
                     # try to make search more efficient by searching for a suitable cut edge among edges with high betweenness-centrality
@@ -170,7 +175,7 @@ class MCMC(Base):
                         T.remove_edge(*e)
                         comp = nx.connected_components(T)  # T nows has 2 components
                         next(comp)  # second one tends to be smaller → faster to sum over → skip over the first component
-                        s = sum(T.nodes[n]['total_pop'] for n in next(comp))  # sum population in component 2
+                        s = sum(H.nodes[n]['total_pop'] for n in next(comp))  # sum population in component 2
                         t = q - s  # pop of component 0 (recall q is the combined pop of d0&d1)
                         if s > t:  # ensure s < t
                             s, t = t, s
@@ -183,7 +188,6 @@ class MCMC(Base):
                             # Else, colors can get quite "jumpy" and give an impression of chaos and instability
                             # To achieve this, add aland of nodes that have the same od & new district label
                             # and subtract aland of nodes that change district label.  If negative, swap d0 & d1.
-                            
                             comp = get_components(T)
                             x = H.nodes(data=True)
                             s = (sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]==d0) -
@@ -202,7 +206,7 @@ class MCMC(Base):
                             # update stats
                             self.get_stats()
                             assert abs(self.pop_imbalance - imb) < 1e-2, f'disagreement betwen pop_imbalance calculations {self.pop_imbalance} v {imb}'
-                            if self.hash in self.hashes: # if we've already seen that plan before, reject and keep trying for a new one
+                            if self.partition in self.partitions: # if we've already seen that plan before, reject and keep trying for a new one
 #                                 print(f'duplicate plan {self.hash}', end=concat_str)
                                 T.add_edge(*e)
                                 # Restore old district labels
@@ -210,7 +214,7 @@ class MCMC(Base):
                                     self.graph.nodes[n][self.district_type] = H.nodes[n][self.district_type]
                                 self.get_stats()
                             else:  # if this is a never-before-seen plan, keep it and return happy
-                                print(f'recombed {self.district_type} {d0} & {d1} got pop_imbalance={self.pop_imbalance:.2f}%', end=concat_str)
+#                                 print(f'recombed {self.district_type} {d0} & {d1} got pop_imbalance={self.pop_imbalance:.2f}%', end=concat_str)
                                 recom_found = True
                                 break
                     if recom_found:
