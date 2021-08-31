@@ -1,6 +1,5 @@
 proj_id = 'cmat-315920'
 root_path = '/home/jupyter'
-code_path = root_path + '/MathVGerrmandering_CMAT_2021/src/'
 
 import google, time, datetime, dataclasses, typing, os, pathlib, shutil, urllib
 import zipfile as zf, numpy as np, pandas as pd, geopandas as gpd, networkx as nx

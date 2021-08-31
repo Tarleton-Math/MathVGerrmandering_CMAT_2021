@@ -19,7 +19,7 @@ mcmc_opts = {
     'user_name'          : 'cook',
     'random_seed'        : 1,
     'num_steps'          : 10000,
-    'pop_imbalance_tol'  : 10.0,
+    'pop_imbalance_tol'  : 80.0,
     'pop_imbalance_stop' : True,
     'new_districts'      : 2,
     'num_colors'         : 10,
@@ -61,7 +61,7 @@ graph_opts['refresh_tbl'] = (
 
 
 from src.mcmc import *
-for s in range(50):
+for s in range(10000):
     mcmc_opts['random_seed'] = s
     print(f"random seed {mcmc_opts['random_seed']}")
     M = MCMC(**mcmc_opts)

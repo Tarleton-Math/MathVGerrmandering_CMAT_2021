@@ -13,14 +13,16 @@ class MCMC(Base):
     new_districts      : int = 0
 
     def __post_init__(self):
-        self.rng = np.random.default_rng(int(self.random_seed))
+        self.random_seed = int(self.random_seed)
+        self.rng = np.random.default_rng(self.random_seed)
         self.gpickle = pathlib.Path(self.gpickle)
         a = self.gpickle.stem.split('_')
         b = '_'.join(a[1:])
-        timestamp = str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_')
-        self.tbl = f'{proj_id}.redistricting_results_{self.user_name}.{b}_{timestamp}'
+#         label = str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_')
+        label = 'seed_' + str(self.random_seed).rjust(4, "0")
+        self.tbl = f'{proj_id}.redistricting_results_{self.user_name}.{b}_{label}'
         self.graph = nx.read_gpickle(self.gpickle)
-        self.gpickle_out = f'{str(self.gpickle)[:-8]}_{timestamp}.gpickle'
+        self.gpickle_out = f'{str(self.gpickle)[:-8]}_{label}.gpickle'
         
         
         if self.new_districts > 0:
@@ -95,7 +97,6 @@ class MCMC(Base):
             nx.set_node_attributes(self.graph, self.plan, 'plan')
             while True:
                 if self.recomb():
-                    self.get_stats()
                     self.plans.append(pd.DataFrame.from_dict(dict(self.graph.nodes(data=True)), orient='index')[['plan', 'cd']])
                     self.stats.append(self.stat.copy())
                     self.summaries.append(self.summary.copy())
@@ -121,9 +122,10 @@ class MCMC(Base):
         
         
     def recomb(self):
+        self.get_stats()
         L = self.stat['total_pop'].copy().sort_values().index
         if self.pop_imbalance < self.pop_imbalance_tol:
-            tol = districts.pop_imbalance_tol
+            tol = self.pop_imbalance_tol
             pairs = self.rng.permutation([(a, b) for a in L for b in L if a<b])
         else:
             print(f'pushing', end=concat_str)
@@ -162,18 +164,18 @@ class MCMC(Base):
                     # we focus on edges near the center.  Betweenness-centrality is a good metric for this.
                     B = nx.edge_betweenness_centrality(T)
                     B = sorted(B.items(), key=lambda x:x[1], reverse=True)  # sort edges on betweenness-centrality (largest first)
-                    max_tries = int(min(100, 0.15*len(B)))  # number of edge cuts to attempt before giving up on this tree
+                    max_tries = int(min(300, 0.2*len(B)))  # number of edge cuts to attempt before giving up on this tree
                     k = 0
                     for e, cent in B[:max_tries]:
                         T.remove_edge(*e)
                         comp = nx.connected_components(T)  # T nows has 2 components
                         next(comp)  # second one tends to be smaller → faster to sum over → skip over the first component
                         s = sum(T.nodes[n]['total_pop'] for n in next(comp))  # sum population in component 2
-                        t = q - s  # pop of component 1 (recall q is the combined pop of d0&d1)
+                        t = q - s  # pop of component 0 (recall q is the combined pop of d0&d1)
                         if s > t:  # ensure s < t
                             s, t = t, s
-                        pop_imbalance = (max(t, P_max) - min(s, P_min)) / self.pop_ideal * 100  # compute new pop imbalance
-                        if pop_imbalance > tol:
+                        imb = (max(t, P_max) - min(s, P_min)) / self.pop_ideal * 100  # compute new pop imbalance
+                        if imb > tol:
                             T.add_edge(*e)  #  if pop_balance not achieved, re-insert e
                         else:
                             # We found a good cut edge & made 2 new districts.  They will be label with the values of d0 & d1.
@@ -184,8 +186,10 @@ class MCMC(Base):
                             
                             comp = get_components(T)
                             x = H.nodes(data=True)
-                            s = (sum((-1)**(x[n][self.district_type]==d0) * x[n]['aland'] for n in comp[0]) +
-                                 sum((-1)**(x[n][self.district_type]==d1) * x[n]['aland'] for n in comp[1]))
+                            s = (sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]==d0) -
+                                 sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]!=d0) +
+                                 sum(x[n]['aland'] for n in comp[1] if x[n][self.district_type]==d1) -
+                                 sum(x[n]['aland'] for n in comp[1] if x[n][self.district_type]!=d1))
                             if s < 0:
                                 d0, d1 = d1, d0
                                 
@@ -195,16 +199,18 @@ class MCMC(Base):
                             for n in comp[1]:
                                 self.graph.nodes[n][self.district_type] = d1
                             
-                            # update districts
-                            self.get_districts()
+                            # update stats
+                            self.get_stats()
+                            assert abs(self.pop_imbalance - imb) < 1e-2, f'disagreement betwen pop_imbalance calculations {self.pop_imbalance} v {imb}'
                             if self.hash in self.hashes: # if we've already seen that plan before, reject and keep trying for a new one
 #                                 print(f'duplicate plan {self.hash}', end=concat_str)
                                 T.add_edge(*e)
                                 # Restore old district labels
                                 for n in H.nodes:
                                     self.graph.nodes[n][self.district_type] = H.nodes[n][self.district_type]
+                                self.get_stats()
                             else:  # if this is a never-before-seen plan, keep it and return happy
-                                print(f'recombed {self.district_type} {d0} & {d1} got pop_imbalance={pop_imbalance:.2f}%', end=concat_str)
+                                print(f'recombed {self.district_type} {d0} & {d1} got pop_imbalance={self.pop_imbalance:.2f}%', end=concat_str)
                                 recom_found = True
                                 break
                     if recom_found:

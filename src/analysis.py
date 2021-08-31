@@ -13,11 +13,12 @@ class Analysis(Base):
         
     def plot(self):
         df = read_table(tbl=self.plans)
-#         d = len(str(df['plan'].max()))
-#         df['plan'] = df['plan'].astype(str).str.rjust(d, '0')
         df = df.pivot(index='geoid', columns='plan').astype(int)
         df.columns = df.columns.droplevel().rename(None)
-        plans = df.columns.tolist()
+        d = len(str(df.columns.max()))
+        plans = ['plan_'+str(c).rjust(d, '0') for c in df.columns]
+        df.columns = plans
+        
         shapes = run_query(f'select geoid, total_pop, aland, polygon from {self.nodes}')
         df = df.merge(shapes, on='geoid')
         geo = gpd.GeoSeries.from_wkt(df['polygon'], crs='EPSG:4326').simplify(0.001).buffer(0) #<-- little white space @ .001 ~5.7 mb, minimal at .0001 ~10mb, with no white space ~37mb
@@ -25,7 +26,6 @@ class Analysis(Base):
         self.gdf = gpd.GeoDataFrame(df.drop(columns='polygon'), geometry=geo)
 
         pandas_bokeh.output_notebook() #<------------- uncommment to view in notebook
-        
         fig = self.gdf.plot_bokeh(
             figsize=(900, 600),
             slider = plans,
