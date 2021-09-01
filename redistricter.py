@@ -41,11 +41,11 @@ graph_opts['refresh_tbl'] = (
 #     'elections',
 #     'nodes',
 #     'edges',
-#     'graph',
+    'graph',
 )
 
-# from src.graph import *
-# G = Graph(**graph_opts)
+from src.graph import *
+G = Graph(**graph_opts)
 # del G
 
 
@@ -91,7 +91,7 @@ def f(seed):
 
 start = time.time()
 with multiprocessing.Pool() as pool:
-    seeds = list(range(8*pool._processes))
+    seeds = list(range(100, 100 + 1*pool._processes))
     pool.map(f, seeds)
 elapsed = time.time() - start
 h, m = divmod(elapsed, 3600)

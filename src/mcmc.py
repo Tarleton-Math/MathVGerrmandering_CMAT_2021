@@ -32,7 +32,6 @@ class MCMC(Base):
                 self.graph.nodes[n][self.district_type] = str(M)
         self.plan = 0
         self.get_districts()
-#         self.get_colors()
         self.num_districts = len(self.districts)
         self.pop_total = self.sum_nodes(self.graph, 'total_pop')
         self.pop_ideal = self.pop_total / self.num_districts
@@ -51,18 +50,6 @@ class MCMC(Base):
         grp = self.nodes_df().groupby('cd')
         self.districts = {k:tuple(sorted(v)) for k,v in grp.groups.items()}
         self.partition = tuple(sorted(self.districts.values())).__hash__()
-
-#     def get_colors(self):
-#         self.get_districts()
-#         H = nx.Graph()
-#         for i, N in self.districts.items():
-#             for j, M in self.districts.items():
-#                 if i < j:
-#                     if len(nx.node_boundary(self.graph, N, M)) > 0:
-#                         H.add_edge(i, j)
-#         k = max([d for n, d in H.degree]) + 1
-#         self.colors = nx.equitable_color(H, k)
-# #         return pd.Series(nx.equitable_color(H, k)) + 1
 
     def sum_nodes(self, G, attr='total_pop'):
         return sum(x for n, x in G.nodes(data=attr))
@@ -117,7 +104,7 @@ class MCMC(Base):
 #         print('MCMC done')
 
         self.plans = pd.concat(self.plans, axis=0).rename_axis('geoid')
-        self.stats = pd.concat(self.stats, axis=0).rename_axis('geoid')
+        self.stats = pd.concat(self.stats, axis=0).rename_axis(self.district_type)
         self.summaries = pd.concat(self.summaries, axis=0)
         
         load_table(tbl=self.tbl+'_plans'  , df=self.plans.reset_index()  , preview_rows=0)

@@ -14,7 +14,7 @@ class Nodes(Variable):
         self.cols = {'assignments': Levels + District_types,
                      'shapes'     : ['aland', 'polygon'],
                      'census'     : Census_columns['data'],
-                     'elections'  : get_cols(self.g.elections.tbl)
+                     'elections'  : [c for c in get_cols(self.g.elections.tbl) if c not in ['geoid', 'county']]
                     }
         exists = super().get()
         if not exists['tbl']:
@@ -35,6 +35,7 @@ class Nodes(Variable):
         query = f"""
 select
     A.geoid,
+    max(E.county) over (partition by cnty) as county,
     {join_str(1).join(sels)},
 from
     {self.g.assignments.tbl} as A
@@ -55,28 +56,33 @@ on
 
 
     def process(self):
+        if self.level in ['tabblock', 'bg', 'tract', 'cnty']:
+            query_temp = f"select *, substring({self.g.level}, 3) as level_temp from {self.g.assignments.tbl}"
+        else:
+            query_temp = f"select *, {self.g.level} as level_temp from {self.g.assignments.tbl}"
+        
         if not self.g.county_line:
             query_temp = f"""
 select
     geoid,
-    {self.g.level} as geoid_new
+    level_temp as geoid_new,
 from
-    {self.g.assignments.tbl}
+    ({query_temp})
 """
     
         else:
             query_temp = f"""
 select
     geoid,
-    case when ct=1 then cnty else {self.g.level} end as geoid_new
+    case when ct > 1 then level_temp else substring(cnty, 3) end as geoid_new,
 from (
     select
         geoid,
+        level_temp,
         cnty,
-        cntyvtd,
         count(distinct {self.g.district_type}) over (partition by cnty) as ct,
     from
-        {self.g.assignments.tbl}
+        ({query_temp})
     )
 """
             
@@ -93,6 +99,7 @@ from (
     from (
         select
             geoid_new as geoid,
+            max(county)   as county,
             max(district) as {self.g.district_type},
             {join_str(3).join(sels)},
             st_union_agg(polygon) as polygon,

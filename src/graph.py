@@ -16,7 +16,7 @@ class Graph(Variable):
     level             : str = 'tract'
     district_type     : str = 'cd'
     county_line       : bool = True
-    node_attrs        : typing.Tuple = ('total_pop', 'aland', 'perim', 'polsby_popper')
+    node_attrs        : typing.Tuple = ('county', 'total_pop', 'aland', 'perim', 'polsby_popper')
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
     election_filters  : typing.Tuple = (

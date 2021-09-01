@@ -70,7 +70,7 @@ class Elections(Variable):
             display(df[unmatched].sort_values('votes', ascending=False))
             raise Exception('Unmatched election results')
         
-        self.df = df.drop(columns=['county', 'fips', 'vtd', 'incumbent', 'alt']).rename(columns={'name':'candidate'})
+        self.df = df.drop(columns=['fips', 'vtd', 'incumbent', 'alt']).rename(columns={'name':'candidate'})
         self.df.to_parquet(self.pq)
         load_table(self.raw, df=self.df, preview_rows=0)
         
@@ -84,6 +84,7 @@ class Elections(Variable):
         query = f"""
 select
     A.geoid,
+    B.county,
     concat(B.office, "_", B.election_yr, "_", B.race, "_", B.party, "_", B.candidate) as election,
     B.votes * A.cntyvtd_pop_prop as votes,
 from 
@@ -119,6 +120,7 @@ select
 from (
     select
         geoid,
+        county,
         election,
         votes
     from
@@ -137,6 +139,7 @@ pivot(
                 query_join = f"""
 select
     A.geoid,
+    A.county,
     {join_str(1).join(elections)}
 from
     {t} as {alias}
