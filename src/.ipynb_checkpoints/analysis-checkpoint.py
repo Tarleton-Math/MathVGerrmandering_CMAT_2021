@@ -9,10 +9,10 @@ except:
 @dataclasses.dataclass
 class Analysis(Base):
     nodes : str
-    plans : str
+    tbl   : str
         
     def plot(self):
-        df = read_table(tbl=self.plans)
+        df = read_table(tbl=self.tbl+'_plans')
         df = df.pivot(index='geoid', columns='plan').astype(int)
         df.columns = df.columns.droplevel().rename(None)
         d = len(str(df.columns.max()))
@@ -34,11 +34,14 @@ class Analysis(Base):
             colormap= "Category20",
             hovertool_columns=['total_pop', 'aland'],
             tile_provider="CARTODBPOSITRON",
-            return_html=False,
+            return_html=True,
             show_figure=True,
             **{'fill_alpha' :.8,
               'line_alpha':.05,}
         )
+        fn = root_path / f'images/{self.tbl.split(".")[-1]}.html'
+        with open(fn, 'w') as file:
+            file.write(fig)
         return fig
 
 
