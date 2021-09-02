@@ -7,6 +7,9 @@ if os.getenv('PYTHONHASHSEED') != hashseed:
 
 ################# Define parameters #################
 from src import *
+from src.graph import *
+from src.mcmc import *
+from src.analysis import *
 
 graph_opts = {
     'abbr'          : 'TX',
@@ -18,7 +21,6 @@ graph_opts = {
 #         "office like 'USRep%' and race='general'",
     ),
 }
-
 
 ################# Get Data and Make Graph if necessary #################
 
@@ -41,17 +43,16 @@ graph_opts['refresh_tbl'] = (
 #     'elections',
 #     'nodes',
 #     'edges',
-    'graph',
+#     'graph',
 )
 
-from src.graph import *
 G = Graph(**graph_opts)
 # del G
 
 
 ################# Run MCMC #################
 
-from src.mcmc import *
+
 import multiprocessing
 
 user_name = input(f'user_name (default=cook)')
@@ -63,10 +64,10 @@ if max_steps == '':
     max_steps = 100000
 
 pop_imbalance_stop = input(f'pop_imbalance_stop (default=True)')
-if pop_imbalance_stop.lower() in ('t', 'true', 'y', 'yes'):
-    pop_imbalance_stop = True
-else:
+if pop_imbalance_stop.lower() in ('f', 'false', 'n', 'no'):
     pop_imbalance_stop = False
+else:
+    pop_imbalance_stop = True
 
 mcmc_opts = {
     'user_name'          : user_name,
@@ -77,7 +78,8 @@ mcmc_opts = {
     'new_districts'      : 2,
     'num_colors'         : 10,
     'district_type'      : graph_opts['district_type'],
-    'gpickle'            : '/home/jupyter/redistricting_data/graph/TX/graph_TX_2020_cntyvtd_cd.gpickle'
+    'gpickle'            : G.gpickle,
+#     'gpickle'            : '/home/jupyter/redistricting_data/graph/TX/graph_TX_2020_cntyvtd_cd.gpickle'
 }
 
 
@@ -86,12 +88,17 @@ def f(seed):
     M = MCMC(random_seed=seed, **mcmc_opts)
     assert seed == M.random_seed
     M.run_chain()
+    A = Analysis(nodes=G.nodes.tbl, tbl=M.tbl)
+    fig = A.plot(show=False)
+    A.get_results()
     print(f'finished seed {seed} after {M.plan} steps with pop_imbalance={M.pop_imbalance}')
 
-
 start = time.time()
+seed_start = 200
+seeds_per_worker = 8
 with multiprocessing.Pool() as pool:
-    seeds = list(range(100, 100 + 1*pool._processes))
+    seeds = list(range(seed_start, seed_start + seeds_per_worker * pool._processes))
+    print(seeds)
     pool.map(f, seeds)
 elapsed = time.time() - start
 h, m = divmod(elapsed, 3600)

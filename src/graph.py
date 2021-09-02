@@ -16,7 +16,7 @@ class Graph(Variable):
     level             : str = 'tract'
     district_type     : str = 'cd'
     county_line       : bool = True
-    node_attrs        : typing.Tuple = ('county', 'total_pop', 'aland', 'perim', 'polsby_popper')
+    node_attrs        : typing.Tuple = ('county', 'total_pop', 'density', 'aland', 'perim', 'polsby_popper')
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
     election_filters  : typing.Tuple = (
@@ -82,8 +82,8 @@ from (
     select
         x.geoid as geoid_x,
         y.geoid as geoid_y,        
-        st_distance(x.point, y.point) as distance,
-        st_length(st_intersection(x.polygon, y.polygon)) as shared_perim
+        st_distance(x.point, y.point) / {meters_per_mile} as distance,
+        st_length(st_intersection(x.polygon, y.polygon)) / {meters_per_mile} as shared_perim
     from
         {self.nodes.tbl} as x,
         {self.nodes.tbl} as y
@@ -92,12 +92,12 @@ from (
         and st_intersects(x.polygon, y.polygon)
     )
 where
-    shared_perim > 10
+    shared_perim > 0.01
 order by
     geoid_x, geoid_y
 """
-        edges = run_query(query)
-        self.graph = self.edges_to_graph(edges, edge_attrs=('distance', 'shared_perim'))
+        self.edges = run_query(query)
+        self.graph = self.edges_to_graph(self.edges, edge_attrs=('distance', 'shared_perim'))
         self.nodes.df = read_table(self.nodes.tbl, cols=list(self.node_attrs) + [self.district_type, 'geoid']).set_index('geoid')
         nx.set_node_attributes(self.graph, self.nodes.df.to_dict('index'))
 
@@ -128,7 +128,7 @@ from (
         select
             x.geoid as geoid_x,
             y.geoid as geoid_y,
-            st_distance(x.point, y.point) as distance
+            st_distance(x.point, y.point) / {meters_per_mile} as distance
         from
             {self.nodes.tbl} as x,
             {self.nodes.tbl} as y

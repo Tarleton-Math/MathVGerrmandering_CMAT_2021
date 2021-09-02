@@ -224,6 +224,7 @@ Levels = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd']
 District_types = ['cd', 'sldu', 'sldl']
 Years = [2010, 2020]
 concat_str = ' ... '
+meters_per_mile = 1609.344
 
 try:
     states

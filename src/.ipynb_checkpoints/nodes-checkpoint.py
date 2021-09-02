@@ -90,12 +90,13 @@ from (
         query = f"""
 select
     *,
-    case when perim > 0 then round(4 * acos(-1) * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
+    case when perim > 0 then round(4 * {np.pi} * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
+    case when aland > 0 then total_pop / aland else 0 end as density,
     st_centroid(polygon) as point
 from (
     select
         *,
-        st_perimeter(polygon) as perim
+        st_perimeter(polygon) / {meters_per_mile} as perim 
     from (
         select
             geoid_new as geoid,
@@ -103,7 +104,7 @@ from (
             max(district) as {self.g.district_type},
             {join_str(3).join(sels)},
             st_union_agg(polygon) as polygon,
-            sum(aland) as aland
+            sum(aland) / {meters_per_mile**2} as aland
         from (
             select
                 *,

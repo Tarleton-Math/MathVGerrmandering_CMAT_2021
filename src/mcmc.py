@@ -60,10 +60,14 @@ class MCMC(Base):
         for d, N in self.districts.items():
             H = self.graph.subgraph(N)
             s = dict()
-            s['total_pop'] = self.sum_nodes(H, 'total_pop')
             s['aland'] = self.sum_nodes(H, 'aland')
-            s['perim'] = self.sum_nodes(H, 'perim') - 2*sum(x for a, b, x in H.edges(data='shared_perim'))
+            shared_perim = 2*sum(x for a, b, x in H.edges(data='shared_perim') if x is not None)
+#             if shared_perim is None:
+#                 shared_perim = 0
+            s['perim'] = self.sum_nodes(H, 'perim') - shared_perim
             s['polsby_popper'] = 4 * np.pi * s['aland'] / (s['perim']**2) * 100
+            s['total_pop'] = self.sum_nodes(H, 'total_pop')
+            s['density'] = s['total_pop'] / s['aland']
             for k, v in s.items():
                 self.stat.loc[d, k] = v
         self.stat.insert(0, 'plan', self.plan)
