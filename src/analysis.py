@@ -46,8 +46,7 @@ class Analysis(Base):
                 tile_provider = "CARTODBPOSITRON",
                 return_html = True,
                 show_figure = show,
-#                 number_format="1.0 $",
-                **{'fill_alpha' :.8,
+                **{'fill_alpha' :.4,
                   'line_alpha':.05,}
             )
             fn = self.results_path / f'{self.run}_map.html'
