@@ -46,7 +46,7 @@ class Analysis(Base):
                 tile_provider = "CARTODBPOSITRON",
                 return_html = True,
                 show_figure = show,
-                **{'fill_alpha' :.4,
+                **{'fill_alpha' :.5,
                   'line_alpha':.05,}
             )
             fn = self.results_path / f'{self.run}_map.html'
@@ -73,11 +73,17 @@ class Analysis(Base):
             self.summary = read_table(tbl=self.tbl+'_summary').sort_values('plan')
             fn = self.results_path / f'{self.run}_summary.csv'
             self.summary.to_csv(fn)
-#             rpt(f'summary copy for {self.seed} - success')
 #             rpt(f'summary copy for {self.seed} - succeed')
         except Exception as e:
             rpt(f'summary copy for {self.seed} - FAIL {e}')
         
+        try:
+            self.plans = read_table(tbl=self.tbl+'_plans').sort_values('plan')
+            fn = self.results_path / f'{self.run}_plans.csv'
+            self.plans.to_csv(fn)
+#             rpt(f'plans copy for {self.seed} - succeed')
+        except Exception as e:
+            rpt(f'plans copy for {self.seed} - FAIL {e}')
 
         try:
             cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['county', 'aland', 'perim', 'polsby_popper', 'density', 'polygon', 'point']]

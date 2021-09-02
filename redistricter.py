@@ -87,20 +87,30 @@ def f(seed):
     print(f'starting seed {seed}')
     M = MCMC(random_seed=seed, **mcmc_opts)
     assert seed == M.random_seed
-    M.run_chain()
+#     M.run_chain()
     A = Analysis(nodes=G.nodes.tbl, tbl=M.tbl)
+    print(f'fig {seed}')
     fig = A.plot(show=False)
+    print(f'compute {seed}')
     A.get_results()
-    print(f'finished seed {seed} after {M.plan} steps with pop_imbalance={M.pop_imbalance}')
+#     print(f'finished seed {seed} after {M.plan} steps with pop_imbalance={M.pop_imbalance}')
 
 start = time.time()
 seed_start = 200
 seeds_per_worker = 8
-with multiprocessing.Pool() as pool:
-    seeds = list(range(seed_start, seed_start + seeds_per_worker * pool._processes))
-    print(seeds)
-    pool.map(f, seeds)
-elapsed = time.time() - start
-h, m = divmod(elapsed, 3600)
-m, s = divmod(m, 60)
-print(f'{int(h)}hrs {int(m)}min {s:.2f}sec elapsed')
+
+for seed in range(200, 233):
+    f(seed)
+
+
+# with multiprocessing.Pool() as pool:
+#     seeds = list(range(seed_start, seed_start + seeds_per_worker * pool._processes))
+# #     print(seeds)
+#     pool.map(f, seeds)
+# elapsed = time.time() - start
+# h, m = divmod(elapsed, 3600)
+# m, s = divmod(m, 60)
+# print(f'{int(h)}hrs {int(m)}min {s:.2f}sec elapsed')
+
+cmd = f'gsutil cp -m -r {root_path}/results gs://cmat-315920-bucket'
+os.command(cmd)
