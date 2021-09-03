@@ -56,14 +56,14 @@ G = Graph(**graph_opts)
 import multiprocessing
 
 user_name = 'cook'
-u = input(f'user_name (default={user_name})')
-if u == '':
-    user_name = u
+# u = input(f'user_name (default={user_name})')
+# if u != '':
+#     user_name = u
 
-max_steps = 10000    
-m = input(f'max_steps (default={max_steps})')
-if m == '':
-    max_steps = m
+max_steps = 10000
+# m = input(f'max_steps (default={max_steps})')
+# if m != '':
+#     max_steps = int(m)
 
 # pop_imbalance_stop = input(f'pop_imbalance_stop (default=True)')
 # if pop_imbalance_stop.lower() in ('f', 'false', 'n', 'no'):
@@ -75,7 +75,8 @@ mcmc_opts = {
     'user_name'          : user_name,
 #     'random_seed'        : 1,
     'max_steps'          : max_steps,
-    'anneal'             : 1,
+    'anneal'             : 0,
+    'report_period'      : 50,
 #     'pop_imbalance_tol'  : 10.0,
 #     'pop_imbalance_stop' : pop_imbalance_stop,
     'new_districts'      : 2,
@@ -96,19 +97,20 @@ def f(seed):
     fig = A.plot(show=False)
 #     print(f'compute {seed}')
     A.get_results()
-    print(f'finished seed {seed} after {M.plan} steps with pop_imbalance={M.pop_imbalance}')
+    print(f'finished seed {seed} after {M.plan} steps with pop_imbalance={M.pop_imbalance:.1f}')
 
 start = time.time()
-seed_start = 300
+seed_start = 400
 seeds_per_worker = 1
 
-with multiprocessing.Pool() as pool:
-    seeds = list(range(seed_start, seed_start + seeds_per_worker * pool._processes))
-#     print(seeds)
-    pool.map(f, seeds)
+# with multiprocessing.Pool() as pool:
+#     seeds = list(range(seed_start, seed_start + seeds_per_worker * pool._processes))
+#     pool.map(f, seeds)
 
+# f(seeds[0])
 # for seed in seeds:
 #     f(seed)
 
-cmd = f'gsutil cp -m -r {root_path}/results gs://cmat-315920-bucket'
-os.command(cmd)
+cmd = f'gsutil -m cp -r {root_path}/results gs://cmat-315920-bucket'
+print(cmd)
+os.system(cmd)

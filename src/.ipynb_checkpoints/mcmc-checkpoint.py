@@ -9,6 +9,7 @@ class MCMC(Base):
     random_seed        : int = 1
     num_colors         : int = 10
     anneal             : float = 1.0
+    report_period      : int = 10
 #     pop_imbalance_tol  : float = 10.0
 #     pop_imbalance_stop : bool = False
     new_districts      : int = 0
@@ -89,8 +90,9 @@ class MCMC(Base):
         self.summaries  = [self.summary.copy()]
         self.partitions = [self.partition]
         for k in range(1, self.max_steps+1):
-#             rpt(f"MCMC {k}")
             self.plan += 1
+            if k%self.report_period == 0:
+                print(f"Seed {self.random_seed} at step {k} with pop_imbalance {self.pop_imbalance:.1f}")
             nx.set_node_attributes(self.graph, self.plan, 'plan')
             while True:
                 if self.recomb():
@@ -167,9 +169,10 @@ class MCMC(Base):
                         imb = (max(t, P_max) - min(s, P_min)) / self.pop_ideal * 100  # compute new pop imbalance
                         I = self.pop_imbalance - imb
                         if I < 0:
-                            if self.anneal < 1e-4:
-                                T.add_edge(*e)  #  if pop_balance not achieved, re-insert e                                
-                            elif self.rng.uniform() > np.exp(self.anneal * I):
+                            if self.anneal < 1e-7:
+                                T.add_edge(*e)  #  if pop_balance not achieved, re-insert e
+                                continue
+                            elif self.rng.uniform() > np.exp(I / self.anneal):
                                 T.add_edge(*e)  #  if pop_balance not achieved, re-insert e
                                 continue
                         # We found a good cut edge & made 2 new districts.  They will be label with the values of d0 & d1.
