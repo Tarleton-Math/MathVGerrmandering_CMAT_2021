@@ -67,8 +67,8 @@ class Analysis(Base):
             shutil.copy(graph_source, graph_target)
 #             rpt(f'graph copy for {self.seed} - success')
         except Exception as e:
-            rpt(f'graph copy for {self.seed} - FAIL {e}')
-
+#             rpt(f'graph copy for {self.seed} - FAIL {e}')
+            pass
         try:
             self.summary = read_table(tbl=self.tbl+'_summary').sort_values('plan')
             fn = self.results_path / f'{self.run}_summary.csv'

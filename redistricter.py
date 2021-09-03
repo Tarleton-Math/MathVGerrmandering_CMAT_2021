@@ -18,7 +18,7 @@ graph_opts = {
     'election_filters' : (
         "office='President' and race='general'",
         "office='USSen' and race='general'",
-#         "office like 'USRep%' and race='general'",
+        "left(office, 5)='USRep' and race='general'",
     ),
 }
 
@@ -32,7 +32,6 @@ graph_opts['refresh_all'] = (
 #     'census',
 #     'elections',
 #     'nodes',
-#     'edges',
 #     'graph',
 )
 graph_opts['refresh_tbl'] = (
@@ -42,7 +41,6 @@ graph_opts['refresh_tbl'] = (
 #     'census',
 #     'elections',
 #     'nodes',
-#     'edges',
 #     'graph',
 )
 
@@ -53,28 +51,33 @@ G = Graph(**graph_opts)
 ################# Run MCMC #################
 
 
+
+
 import multiprocessing
 
-user_name = input(f'user_name (default=cook)')
-if user_name == '':
-    user_name = 'cook'
+user_name = 'cook'
+u = input(f'user_name (default={user_name})')
+if u == '':
+    user_name = u
 
-max_steps = input(f'max_steps (default=100000)')
-if max_steps == '':
-    max_steps = 100000
+max_steps = 10000    
+m = input(f'max_steps (default={max_steps})')
+if m == '':
+    max_steps = m
 
-pop_imbalance_stop = input(f'pop_imbalance_stop (default=True)')
-if pop_imbalance_stop.lower() in ('f', 'false', 'n', 'no'):
-    pop_imbalance_stop = False
-else:
-    pop_imbalance_stop = True
+# pop_imbalance_stop = input(f'pop_imbalance_stop (default=True)')
+# if pop_imbalance_stop.lower() in ('f', 'false', 'n', 'no'):
+#     pop_imbalance_stop = False
+# else:
+#     pop_imbalance_stop = True
 
 mcmc_opts = {
     'user_name'          : user_name,
 #     'random_seed'        : 1,
     'max_steps'          : max_steps,
-    'pop_imbalance_tol'  : 10.0,
-    'pop_imbalance_stop' : pop_imbalance_stop,
+    'anneal'             : 1,
+#     'pop_imbalance_tol'  : 10.0,
+#     'pop_imbalance_stop' : pop_imbalance_stop,
     'new_districts'      : 2,
     'num_colors'         : 10,
     'district_type'      : graph_opts['district_type'],
@@ -87,30 +90,25 @@ def f(seed):
     print(f'starting seed {seed}')
     M = MCMC(random_seed=seed, **mcmc_opts)
     assert seed == M.random_seed
-#     M.run_chain()
+    M.run_chain()
     A = Analysis(nodes=G.nodes.tbl, tbl=M.tbl)
-    print(f'fig {seed}')
+#     print(f'fig {seed}')
     fig = A.plot(show=False)
-    print(f'compute {seed}')
+#     print(f'compute {seed}')
     A.get_results()
-#     print(f'finished seed {seed} after {M.plan} steps with pop_imbalance={M.pop_imbalance}')
+    print(f'finished seed {seed} after {M.plan} steps with pop_imbalance={M.pop_imbalance}')
 
 start = time.time()
-seed_start = 200
-seeds_per_worker = 8
+seed_start = 300
+seeds_per_worker = 1
 
-for seed in range(200, 233):
-    f(seed)
+with multiprocessing.Pool() as pool:
+    seeds = list(range(seed_start, seed_start + seeds_per_worker * pool._processes))
+#     print(seeds)
+    pool.map(f, seeds)
 
-
-# with multiprocessing.Pool() as pool:
-#     seeds = list(range(seed_start, seed_start + seeds_per_worker * pool._processes))
-# #     print(seeds)
-#     pool.map(f, seeds)
-# elapsed = time.time() - start
-# h, m = divmod(elapsed, 3600)
-# m, s = divmod(m, 60)
-# print(f'{int(h)}hrs {int(m)}min {s:.2f}sec elapsed')
+# for seed in seeds:
+#     f(seed)
 
 cmd = f'gsutil cp -m -r {root_path}/results gs://cmat-315920-bucket'
 os.command(cmd)
