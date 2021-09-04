@@ -119,7 +119,7 @@ def join_str(k=1):
 
 def subquery(query, indents=1):
     s = '\n' + indents * '    '
-    return query[1:-1].replace('\n', s)
+    return query.strip().replace('\n', s)
 
 def yr_to_congress(yr):
     return min(116, int(yr-1786)/2)

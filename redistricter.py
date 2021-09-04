@@ -1,30 +1,14 @@
 ################# Set hashseed for reproducibility #################
-yes = (True, 't', 'true', 'y', 'yes')
+HASHSEED = '0'
 try:
     notebook
 except:
     import os, sys
-    hashseed = '0'
-    if os.getenv('PYTHONHASHSEED') != hashseed:
-        os.environ['PYTHONHASHSEED'] = hashseed
+    if os.getenv('PYTHONHASHSEED') != HASHSEED:
+        os.environ['PYTHONHASHSEED'] = HASHSEED
         os.execv(sys.executable, [sys.executable] + sys.argv)
-    try:
-        skip_inputs = sys.argv[1].lower() in yes
-    except:
-        skip_inputs = False
-try:
-    skip_inputs = skip_inputs in yes
-except:
-    skip_inputs = False
 
 ################# Define parameters #################
-
-def get_inputs(opts):
-    for opt, default in opts.items():
-        inp = input(f'{opt.ljust(20," ")} (default={default})')
-        if inp != '':
-            opts[opt] = inp
-    return opts
 
 graph_opts = {
     'abbr'             : 'TX',
@@ -44,16 +28,31 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'     : 600,
+    'seed_start'      : 200,
     'jobs_per_worker' : 1,
-    'workers'        : 8
+    'workers'         : 1,
 }
 
+yes = (True, 't', 'true', 'y', 'yes')
+def get_inputs(opts):
+    for opt, default in opts.items():
+        inp = input(f'{opt.ljust(20," ")} (default={default})')
+        if inp != '':
+            opts[opt] = inp
+    return opts
+
+try:
+    skip_inputs = skip_inputs in yes
+except:
+    try:
+        skip_inputs = sys.argv[1].lower() in yes
+    except:
+        skip_inputs = False
 
 if not skip_inputs:
     graph_opts = get_inputs(graph_opts)
     mcmc_opts  = get_inputs(mcmc_opts)
-run_opts = get_inputs(run_opts)
+    run_opts = get_inputs(run_opts)
 
 graph_opts['election_filters'] = (
     "office='President' and race='general'",
@@ -71,7 +70,7 @@ if mcmc_opts['pop_imbalance_stop'].lower() in yes:
     mcmc_opts['pop_imbalance_stop'] = True
 else:
     mcmc_opts['pop_imbalance_stop'] = False
-
+    
 ################# Get Data and Make Graph if necessary #################
 from src import *
 from src.graph import *
@@ -103,25 +102,31 @@ mcmc_opts['gpickle'] = G.gpickle
 from src.mcmc import *
 from src.analysis import *
 import multiprocessing
+if os.getenv('PYTHONHASHSEED') == HASHSEED:
+    print(f'hashseed == {HASHSEED} so results are ARE reproducible and WILL be saved to BigQuery')
+else:
+    print(f'hashseed != {HASHSEED} so results are NOT reproducible and will NOT be saved to BigQuery')
 
-
+    
 def f(seed):
     idx = multiprocessing.current_process()._identity[0]
     time.sleep(idx / 100)
     print(f'starting seed {seed}', flush=True)
     start = time.time()
-    M = MCMC(random_seed=seed, **mcmc_opts)
+    M = MCMC(seed=seed, **mcmc_opts)
     M.run_chain()
     elapsed = time.time() - start
     h, m = divmod(elapsed, 3600)
     m, s = divmod(m, 60)
     print(f'finished seed {seed} with pop_imbalance={M.pop_imbalance:.1f} after {M.step} steps and {int(h)}hrs {int(m)}min {s:.2f}sec')
-    
-    A = Analysis(nodes=G.nodes.tbl, tbl=M.tbl)    
-#     print(f'fig {seed}')
-#     fig = A.plot(show=False)
-    A.get_results()
-    print(f'finished analyzing {seed}')
+
+    if os.getenv('PYTHONHASHSEED') == HASHSEED:
+        M.save()
+#         A = Analysis(nodes=G.nodes.tbl, tbl=M.tbl)    
+    #     print(f'fig {seed}')
+    #     fig = A.plot(show=False)
+#         A.get_results()
+#         print(f'finished analyzing {seed}')
     return M
 
 with multiprocessing.Pool(int(run_opts['workers'])) as pool:
@@ -130,6 +135,10 @@ with multiprocessing.Pool(int(run_opts['workers'])) as pool:
     seeds = list(range(a, b))
     print(f'I will run seeds {seeds}', flush=True)
     M = pool.map(f, seeds)
+    
+if os.getenv('PYTHONHASHSEED') == HASHSEED:
+    A = Analysis(nodes=G.nodes.tbl, mcmc=M[0].tbl, seeds=seeds)
+    A.get_results()
 
 # cmd = f'gsutil -m cp -r {root_path}/results gs://cmat-315920-bucket'
 # os.system(cmd)
