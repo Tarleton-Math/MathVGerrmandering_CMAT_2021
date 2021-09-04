@@ -2,25 +2,26 @@ from . import *
 
 @dataclasses.dataclass
 class MCMC(Base):
-    gpickle            : str
-    district_type      : str
-    max_steps          : int
-    user_name          : str
-    random_seed        : int = 1
-    num_colors         : int = 10
-    anneal             : float = 1.0
-    report_period      : int = 10
-#     pop_imbalance_tol  : float = 10.0
-#     pop_imbalance_stop : bool = False
-    new_districts      : int = 0
+    gpickle               : str
+    max_steps             : int
+    user_name             : str
+    random_seed           : int = 1
+    new_districts         : int = 0
+    anneal                : float = 0.0
+    pop_diff_exp          : int = 0
+    pop_imbalance_target  : float = 1.0
+    pop_imbalance_stop    : bool = True
+    report_period         : int = 50
+    
 
     def __post_init__(self):
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
         
         self.gpickle = pathlib.Path(self.gpickle)
-        a = self.gpickle.stem.split('_')
-        b = '_'.join(a[1:])
+        a = self.gpickle.stem.split('_')[1:]
+        self.abbr, self.yr, self.level, self.district_type = a
+        b = '_'.join(a)
 #         label = str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_')
         label = 'seed_' + str(self.random_seed).rjust(4, "0")
         self.tbl = f'{proj_id}.redistricting_results_{self.user_name}.{b}_{label}'
@@ -32,7 +33,6 @@ class MCMC(Base):
             for n in self.nodes_df().nlargest(self.new_districts, 'total_pop').index:
                 M += 1
                 self.graph.nodes[n][self.district_type] = str(M)
-        self.plan = 0
         self.get_districts()
         self.num_districts = len(self.districts)
         self.pop_total = self.sum_nodes(self.graph, 'total_pop')
@@ -64,50 +64,51 @@ class MCMC(Base):
             s = dict()
             s['aland'] = self.sum_nodes(H, 'aland')
             shared_perim = 2*sum(x for a, b, x in H.edges(data='shared_perim') if x is not None)
-#             if shared_perim is None:
-#                 shared_perim = 0
             s['perim'] = self.sum_nodes(H, 'perim') - shared_perim
             s['polsby_popper'] = 4 * np.pi * s['aland'] / (s['perim']**2) * 100
             s['total_pop'] = self.sum_nodes(H, 'total_pop')
             s['density'] = s['total_pop'] / s['aland']
             for k, v in s.items():
                 self.stat.loc[d, k] = v
-        self.stat.insert(0, 'plan', self.plan)
+        self.stat.insert(0, 'plan', self.step)
         self.stat['total_pop'] = self.stat['total_pop'].astype(int)
         
         self.pop_imbalance = (self.stat['total_pop'].max() - self.stat['total_pop'].min()) / self.pop_ideal * 100
         self.summary = pd.DataFrame()
-        self.summary['plan'] = [self.plan]
+        self.summary['plan'] = [self.step]
         self.summary['pop_imbalance'] = [self.pop_imbalance]
         self.summary['polsy_popper']  = [self.stat['polsby_popper'].mean()]
 
 
     def run_chain(self):
-        nx.set_node_attributes(self.graph, self.plan, 'plan')
+        self.step = 0
+        nx.set_node_attributes(self.graph, self.step, 'plan')
         self.get_stats()
         self.plans      = [self.nodes_df()[['plan', self.district_type]]]
         self.stats      = [self.stat.copy()]
         self.summaries  = [self.summary.copy()]
         self.partitions = [self.partition]
         for k in range(1, self.max_steps+1):
-            self.plan += 1
-            if k%self.report_period == 0:
-                print(f"Seed {self.random_seed} at step {k} with pop_imbalance {self.pop_imbalance:.1f}")
-            nx.set_node_attributes(self.graph, self.plan, 'plan')
-            while True:
-                if self.recomb():
-                    self.plans.append(self.nodes_df()[['plan', self.district_type]])
-                    self.stats.append(self.stat.copy())
-                    self.summaries.append(self.summary.copy())
-                    self.partitions.append(self.partition)
-#                     print('success')
-                    break
-                else:
-#                     print(f"No suitable recomb found at {col} - trying again")
-                    continue
-#             if self.pop_imbalance_stop and self.pop_imbalance < self.pop_imbalance_tol:
-#                 rpt(f'pop_imbalance_tol {self.pop_imbalance_tol} satisfied - stopping')
-#                 break
+            self.step = k
+            nx.set_node_attributes(self.graph, self.step, 'plan')
+            msg = f"seed {self.random_seed} step {self.step} pop_imbalance={self.pop_imbalance:.1f}"
+
+            if self.recomb():
+                self.plans.append(self.nodes_df()[['plan', self.district_type]])
+                self.stats.append(self.stat.copy())
+                self.summaries.append(self.summary.copy())
+                self.partitions.append(self.partition)
+#                 print('success')
+                if self.step % self.report_period == 0:
+#                     rpt(msg)
+                    print(msg)
+                if self.pop_imbalance_stop:
+                    if self.pop_imbalance < self.pop_imbalance_target:
+#                         rpt(f'pop_imbalance_target {self.pop_imbalance_target} satisfied - stopping')
+                        break
+            else:
+                rpt(msg)
+                break
 #         print('MCMC done')
 
         self.plans = pd.concat(self.plans, axis=0).rename_axis('geoid')
@@ -121,20 +122,31 @@ class MCMC(Base):
         
         
     def recomb(self):
-        self.get_stats()
-        L = self.stat['total_pop'].sort_values().index.copy()
-        pairs = self.rng.permutation([(a, b) for a in L for b in L if a<b])
-#         print(f'pop_imbalance={self.pop_imbalance:.2f}{concat_str}setting tol={tol:.2f}%', end=concat_str)
-        
-        recom_found = False
-        for d0, d1 in pairs:
+        def gen(pop_diff):
+            while len(pop_diff) > 0:
+                pop_diff /= pop_diff.sum()
+                a = self.rng.choice(pop_diff.index, p=pop_diff)
+                pop_diff.pop(a)
+                yield a
+        L = self.stat['total_pop']
+        pop_diff = pd.DataFrame([(x, y, abs(p-q)) for x, p in L.iteritems() for y, q in L.iteritems() if x < y]).set_index([0,1]).squeeze()
+        pop_diff = (pop_diff / pop_diff.sum()) ** self.pop_diff_exp
+        pairs = gen(pop_diff)
+        while True:
+            try:
+                d0, d1 = next(pairs)
+            except StopIteration:
+                rpt(f'exhausted all district pairs - I think I am stuck')
+                return False
+            except Exception as e:
+                raise Exception(f'unknown error {e}')
             m = list(self.districts[d0]+self.districts[d1])  # nodes in d0 or d1
             H = self.graph.subgraph(m).copy()  # subgraph on those nodes
             if not nx.is_connected(H):  # if H is not connect, go to next district pair
-#                     print(f'{d0},{d1} not connected', end=concat_str)
+#                     rpt(f'{d0},{d1} not connected')
                 continue
 #                 else:
-#                     print(f'{d0},{d1} connected', end=concat_str)
+#                     rpt(f'{d0},{d1} connected')
             P = self.stat['total_pop'].copy()
             p0 = P.pop(d0)
             p1 = P.pop(d1)
@@ -170,8 +182,9 @@ class MCMC(Base):
                         I = self.pop_imbalance - imb
                         if I < 0:
                             if self.anneal < 1e-7:
-                                T.add_edge(*e)  #  if pop_balance not achieved, re-insert e
-                                continue
+                                if I < -0.01:
+                                    T.add_edge(*e)  #  if pop_balance not achieved, re-insert e
+                                    continue
                             elif self.rng.uniform() > np.exp(I / self.anneal):
                                 T.add_edge(*e)  #  if pop_balance not achieved, re-insert e
                                 continue
@@ -199,20 +212,12 @@ class MCMC(Base):
                         self.get_stats()
                         assert abs(self.pop_imbalance - imb) < 1e-2, f'disagreement betwen pop_imbalance calculations {self.pop_imbalance} v {imb}'
                         if self.partition in self.partitions: # if we've already seen that plan before, reject and keep trying for a new one
-#                             print(f'duplicate plan {self.hash}', end=concat_str)
+#                             rpt(f'duplicate plan {self.hash}')
                             T.add_edge(*e)
                             # Restore old district labels
                             for n in H.nodes:
                                 self.graph.nodes[n][self.district_type] = H.nodes[n][self.district_type]
                             self.get_stats()
                         else:  # if this is a never-before-seen plan, keep it and return happy
-#                             print(f'recombed {self.district_type} {d0} & {d1} got pop_imbalance={self.pop_imbalance:.2f}%', end=concat_str)
-                            recom_found = True
-                            break
-                    if recom_found:
-                        break
-                if recom_found:
-                    break
-            if recom_found:
-                break
-        return recom_found
+#                             rpt(f'recombed {self.district_type} {d0} & {d1} got pop_imbalance={self.pop_imbalance:.2f}%')
+                            return True
