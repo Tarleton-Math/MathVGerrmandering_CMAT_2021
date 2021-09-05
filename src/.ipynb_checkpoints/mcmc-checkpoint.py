@@ -130,10 +130,10 @@ class MCMC(Base):
 
 
     def save(self):
+        nx.write_gpickle(self.graph, self.gpickle_out)
         load_table(tbl=self.tbl+'_plans'  , df=self.plans    , preview_rows=0)
         load_table(tbl=self.tbl+'_stats'  , df=self.stats    , preview_rows=0)
         load_table(tbl=self.tbl+'_summary', df=self.summaries, preview_rows=0)
-        nx.write_gpickle(self.graph, self.gpickle_out)
 
 
     def recomb(self):

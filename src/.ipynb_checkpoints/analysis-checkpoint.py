@@ -18,13 +18,10 @@ class Analysis(Base):
         self.base = f'{a[0]}.{a[1]}.{"_".join(b)}_seed'
         b.append(str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_'))
         self.abbr, self.yr, self.level, self.district_type, self.timestamp = b
-        c = '_'.join(b)
-        self.tbl = f'{a[0]}.{a[1]}.{c}'
-        self.file = root_path / f'results/{c}.csv'
-        self.file.parent.mkdir(parents=True, exist_ok=True)
+        self.tbl = f'{a[0]}.{a[1]}.{'_'.join(b)}'
         
 
-    def get_results(self):
+    def compute_results(self):
         u = "\nunion all\n"
         summary_stack = u.join([f'select * from {self.base}_{str(seed).rjust(4, "0")}_summary' for seed in self.seeds])
         stats_stack   = u.join([f'select * from {self.base}_{str(seed).rjust(4, "0")}_stats'   for seed in self.seeds])
@@ -81,8 +78,22 @@ order by
     seed, plan, {self.district_type}
 """
         load_table(tbl=self.tbl, query=query)
+        self.fetch_results()
+        self.save_results()
+        
+    def fetch_results(self):
         self.results = read_table(tbl=self.tbl)
-        self.results.to_csv(self.file, index=False)
+        idx = ['seed', 'plan', 'cd']
+        for col in idx:
+            self.results[col] = rjust(self.results[col])
+        self.results.sort_values(idx, inplace=True)
+        return self.results
+        
+    def save_results(self):
+        self.file = f'results/{self.tbl.split(".")[-1]}.parquet'
+        self.results.to_parquet(str(root_path / self.file), index=False)#, partition_cols='seed')
+        self.results.to_parquet(f"gs://{proj_id}-bucket/{self.file}")
+        return self.results
         
         
     

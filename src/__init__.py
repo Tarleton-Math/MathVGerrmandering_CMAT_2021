@@ -59,6 +59,11 @@ def listify(x):
     else:
         return [x]
 
+def rjust(col):
+    c = col.astype(str)
+    d = c.apply(len).max()
+    return c.str.rjust(d, '0')
+    
 def extract_file(zipfile, fn, **kwargs):
     file = zipfile.extract(fn)
     return lower_cols(pd.read_csv(file, dtype=str, **kwargs))
@@ -120,6 +125,12 @@ def join_str(k=1):
 def subquery(query, indents=1):
     s = '\n' + indents * '    '
     return query.strip().replace('\n', s)
+
+def time_formatter(t):
+    h, m = divmod(t, 3600)
+    m, s = divmod(m, 60)
+    return f'{int(h)}hrs {int(m)}min {s:.2f}sec'
+
 
 def yr_to_congress(yr):
     return min(116, int(yr-1786)/2)

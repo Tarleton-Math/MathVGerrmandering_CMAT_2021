@@ -9,6 +9,8 @@ except:
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
 ################# Define parameters #################
+from src import *
+start_time = time.time()
 
 graph_opts = {
     'abbr'             : 'TX',
@@ -20,7 +22,7 @@ mcmc_opts = {
     'user_name'             : 'cook',
     'max_steps'             : 5000,
     'pop_diff_exp'          : 2,
-    'pop_imbalance_target'  : 80.0,
+    'pop_imbalance_target'  : 1.0,
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
     'report_period'         : 50,
@@ -28,9 +30,9 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'      : 200,
+    'seed_start'      : 0,
     'jobs_per_worker' : 1,
-    'workers'         : 1,
+    'workers'         : 16,
 }
 
 yes = (True, 't', 'true', 'y', 'yes')
@@ -72,7 +74,7 @@ else:
     mcmc_opts['pop_imbalance_stop'] = False
     
 ################# Get Data and Make Graph if necessary #################
-from src import *
+
 from src.graph import *
 
 graph_opts['refresh_all'] = (
@@ -115,30 +117,44 @@ def f(seed):
     start = time.time()
     M = MCMC(seed=seed, **mcmc_opts)
     M.run_chain()
-    elapsed = time.time() - start
-    h, m = divmod(elapsed, 3600)
-    m, s = divmod(m, 60)
-    print(f'finished seed {seed} with pop_imbalance={M.pop_imbalance:.1f} after {M.step} steps and {int(h)}hrs {int(m)}min {s:.2f}sec')
+    print(f'finished seed {seed} with pop_imbalance={M.pop_imbalance:.1f} after {M.step} steps and {time_formatter(time.time() - start)}')
 
     if os.getenv('PYTHONHASHSEED') == HASHSEED:
-        M.save()
-#         A = Analysis(nodes=G.nodes.tbl, tbl=M.tbl)    
-    #     print(f'fig {seed}')
-    #     fig = A.plot(show=False)
-#         A.get_results()
-#         print(f'finished analyzing {seed}')
-    return M
+        saved = False
+        for i in range(1, 120):
+            try:
+                M.save()
+#                 print(f'seed {seed} save try {i} succeeded')
+                return M
+            except:
+#                 rpt(f'seed {seed} try {i} failed')
+                time.sleep(1)
+        raise Exception(f'I tried to write the result of seed {seed} {i} times without success - giving up')
 
 with multiprocessing.Pool(int(run_opts['workers'])) as pool:
     a = int(run_opts['seed_start'])
     b = a + int(run_opts['jobs_per_worker']) * pool._processes
     seeds = list(range(a, b))
-    print(f'I will run seeds {seeds}', flush=True)
-    M = pool.map(f, seeds)
+#     print(f'I will run seeds {seeds}', flush=True)
+#     pool.map(f, seeds)
     
+nodes_tbl = G.nodes.tbl
+mcmc_tbl  = MCMC(seed=seeds[0], **mcmc_opts).tbl
+A = Analysis(nodes=nodes_tbl, mcmc=mcmc_tbl, seeds=seeds)
 if os.getenv('PYTHONHASHSEED') == HASHSEED:
-    A = Analysis(nodes=G.nodes.tbl, mcmc=M[0].tbl, seeds=seeds)
-    A.get_results()
-
+    for attempt in range(1, 6):
+        rpt(f'analysis attempt {attempt}')
+        try:
+            A.compute_results()
+            print(f'success!')
+            break
+        except:
+            rpt(f'failed')
+            new_tbl = nodes_tbl + '_copy'
+            bqclient.copy_table(nodes_tbl, new_tbl).result()
+            nodes_tbl = new_tbl
+        
 # cmd = f'gsutil -m cp -r {root_path}/results gs://cmat-315920-bucket'
 # os.system(cmd)
+
+print(f'total time elapsed = {time_formatter(time.time() - start_time)}')
