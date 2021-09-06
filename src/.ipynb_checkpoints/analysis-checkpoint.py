@@ -8,40 +8,41 @@ except:
 
 @dataclasses.dataclass
 class Analysis(Base):
-    nodes  : str
-    results: str
-    seeds  : typing.Any
+    nodes     : str
+    results_bq: str
+    seeds     : typing.Any
         
     def __post_init__(self):
-        self.tbl = self.results + '_results'
-        a = self.results.split(".")[-1].split('_')
-#         b = a.split('_')[:4]
-        self.abbr, self.yr, self.level, self.district_type = a[:4]
-        self.pq = root_path / f'results/{"_".join(a[:4])}/{"_".join(a[4:])}/results.parquet'
-        self.pq.parent.mkdir(parents=True, exist_ok=True)
-        
-        
-        print(self.tbl, self.pq)
-#         print(self.results)
-#         assert 1==2
-        
-        
-        
-#         a = self.mcmc.split(".")
-#         b = a[-1].split('_')[:-2]
-#         self.base = f'{a[0]}.{a[1]}.{"_".join(b)}_seed'
-#         b.append(str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_'))
-#         self.abbr, self.yr, self.level, self.district_type, self.timestamp = b
-#         self.tbl = f'{a[0]}.{a[1]}.{"_".join(b)}'
-        
+        results_stem = self.results_bq.split(".")[-1]
+        self.abbr, self.yr, self.level, self.district_type = results_stem.split('_')
+
+        self.seeds_list = list()
+        self.bq_list = list()
+        for seed in self.seeds:
+            tbl = self.results_bq + f'_{seed}_'
+            if check_table(tbl + 'plans'):
+                self.seeds_list.append(int(seed))
+                self.bq_list.append(tbl)
+
+        a, b = min(self.seeds_list), max(self.seeds_list)
+        seeds_range = f'{str(a).rjust(4, "0")}_{str(b).rjust(4, "0")}'
+        if all([s in self.seeds_list for s in range(a,b)]):
+            seeds_range += '_complete'
+        else:
+            seeds_range += '_incomplete'
+        self.tbl = self.results_bq + f'_{seeds_range}'
+        self.pq = root_path / f'results/{results_stem}/{seeds_range}.parquet'
+#         print(self.tbl, self.pq, self.bq_list)
 
     def compute_results(self):
         u = "\nunion all\n"
-        summary_stack = u.join([f'select * from {self.results}_seed_{str(seed).rjust(4, "0")}_summary' for seed in self.seeds])
-        stats_stack   = u.join([f'select * from {self.results}_seed_{str(seed).rjust(4, "0")}_stats'   for seed in self.seeds])
-        plans_stack   = u.join([f'select * from {self.results}_seed_{str(seed).rjust(4, "0")}_plans'   for seed in self.seeds])
+        stack = {key: u.join([f'select * from {bq}{key}' for bq in self.bq_list]) for key in ['plans', 'stats', 'summary']}
 
-        cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+#         cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+        
+        cols = [c for c in ['total_white'] if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+
+        
         query = f"""
 select
     B.seed,
@@ -63,13 +64,13 @@ from (
             *,
             row_number() over (partition by A.hash order by plan asc, seed asc) as r
         from (
-            {subquery(summary_stack, indents=3)}
+            {subquery(stack['summary'], indents=3)}
             ) as A
         )
     where r = 1
     ) as B
 inner join (
-    {subquery(stats_stack, indents=1)}
+    {subquery(stack['stats'], indents=1)}
     ) as C
 on
     B.seed = C.seed and B.plan = C.plan
@@ -77,7 +78,7 @@ inner join (
     select
         *
     from (
-        {subquery(plans_stack, indents=2)}
+        {subquery(stack['plans'], indents=2)}
         )
     ) as D
 on
@@ -92,12 +93,8 @@ order by
     seed, plan, {self.district_type}
 """
         load_table(tbl=self.tbl, query=query)
-        df = read_table(tbl=self.tbl)
-        df.to_parquet(self.pq)
-        to_gcs(self.pq)
-#         bqclient.extract_table(self.tbl, )
-#         self.fetch_results()
-#         self.save_results()
+        self.fetch_results()
+        self.save_results()
         
     def fetch_results(self):
         self.results = read_table(tbl=self.tbl)
@@ -108,10 +105,8 @@ order by
         return self.results
         
     def save_results(self):
-        self.results.to_parquet(results_path + 'results.parquet', index=False)
-        self.results.to_parquet(results_gcs  + 'results.parquet', index=False)
-        
-
+        self.results.to_parquet(self.pq)
+        to_gcs(self.pq)
 
 
     def plot(self, show=True):

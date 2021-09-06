@@ -57,17 +57,11 @@ class MCMC(Base):
         for d, N in self.districts.items():
             H = self.graph.subgraph(N)
             s = dict()
-            
-#             aland = self.sum_nodes(H, 'aland')
             internal_perim = 2*sum(x for a, b, x in H.edges(data='shared_perim') if x is not None)
             external_perim = self.sum_nodes(H, 'perim') - internal_perim
             s['aland'] = self.sum_nodes(H, 'aland')
             s['polsby_popper'] = 4 * np.pi * s['aland'] / (external_perim**2) * 100
-
-#             s['perim'] = self.sum_nodes(H, 'perim') - shared_perim
-#             s['polsby_popper'] = 4 * np.pi * s['aland'] / (s['perim']**2) * 100
             s['total_pop'] = self.sum_nodes(H, 'total_pop')
-#             s['density'] = s['total_pop'] / s['aland']
             for k, v in s.items():
                 self.stat.loc[d, k] = v
         self.stat['total_pop'] = self.stat['total_pop'].astype(int)
@@ -124,8 +118,6 @@ class MCMC(Base):
 
     def save(self):
         self.results_path.mkdir(parents=True, exist_ok=True)
-        ds = '.'.join(self.results_bq.split('.')[:-1])
-        bqclient.create_dataset(ds, exists_ok=True)
 
         self.file = self.results_path / f'graph.gpickle'
         nx.write_gpickle(self.graph, self.file)
