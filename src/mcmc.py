@@ -3,7 +3,6 @@ from . import *
 @dataclasses.dataclass
 class MCMC(Base):
     max_steps             : int
-    user_name             : str
     gpickle               : str
     results_bq            : str
     results_path          : str    

@@ -19,8 +19,7 @@ graph_opts = {
 }
 
 mcmc_opts = {
-    'user_name'             : 'cook',
-    'max_steps'            : 2,
+    'max_steps'            : 5000,
     'pop_diff_exp'          : 2,
     'pop_imbalance_target'  : 1.0,
     'pop_imbalance_stop'    : 'True',
@@ -31,8 +30,8 @@ mcmc_opts = {
 
 run_opts = {
     'seed_start'      : 0,
-    'jobs_per_worker' : 1,
-    'workers'         : 2,
+    'jobs_per_worker' : 5,
+    'workers'         : 8,
 
 }
 
@@ -128,8 +127,6 @@ def f(seed):
     print(f'finished seed {seed} with pop_imbalance={M.pop_imbalance:.1f} after {M.step} steps and {time_formatter(time.time() - start)}')
 
     if os.getenv('PYTHONHASHSEED') == HASHSEED:
-#         M.save()
-        
         saved = False
         for i in range(1, 120):
             try:
@@ -152,10 +149,8 @@ from src.analysis import *
 results = mcmc_opts['results_bq']
 # results = 'cmat-315920.results.TX_2020_cntyvtd_cd_2021_09_06_03_35_51'
 
-# mcmc_tbl  = MCMC(seed=seeds[0], **mcmc_opts).tbl
 A = Analysis(nodes=G.nodes.tbl, results=results, seeds=seeds)
 A.compute_results()
-# if os.getenv('PYTHONHASHSEED') == HASHSEED:
 for attempt in range(1, 6):
     rpt(f'analysis attempt {attempt}')
     try:
@@ -168,7 +163,4 @@ for attempt in range(1, 6):
         bqclient.copy_table(nodes_tbl, new_tbl).result()
         nodes_tbl = new_tbl
         
-# cmd = f'gsutil -m cp -r {root_path}/results gs://cmat-315920-bucket'
-# os.system(cmd)
-
 print(f'total time elapsed = {time_formatter(time.time() - start_time)}')
