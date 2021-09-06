@@ -10,7 +10,6 @@ try:
     import google.cloud.bigquery, google.cloud.bigquery_storage
 except:
     os.system('pip install --upgrade google-cloud-bigquery-storage')
-    os.system('pip install --upgrade google-cloud-bigquery')
     import google.cloud.bigquery, google.cloud.bigquery_storage
 
 import warnings

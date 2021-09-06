@@ -30,8 +30,8 @@ mcmc_opts = {
 
 run_opts = {
     'seed_start'      : 0,
-    'jobs_per_worker' : 1,
-    'workers'         : 8,
+    'jobs_per_worker' : 5,
+    'workers'         : 80,
 
 }
 
