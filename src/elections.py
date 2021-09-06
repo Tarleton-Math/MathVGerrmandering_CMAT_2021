@@ -45,12 +45,16 @@ class Elections(Variable):
         
 ######## vertically stack then clean so that joins work correctly later ########
         df = pd.concat(L, axis=0, ignore_index=True).reset_index(drop=True)
-        f = lambda col: col.str.replace(".", "", regex=False).str.replace(" ", "", regex=False).str.replace(",", "", regex=False).str.replace("-", "", regex=False).str.replace("'", "", regex=False)
-        df['name'] = f(df['name'])
-        df['office'] = f(df['office'])
-        df['race'] = f(df['race'])
         df['fips'] = df['fips'].str.lower()
         df['vtd']  = df['vtd'] .str.lower()
+        f = lambda col: col.str.replace(".", "", regex=False).str.replace(" ", "", regex=False).str.replace(",", "", regex=False).str.replace("-", "", regex=False).str.replace("'", "", regex=False)
+        df['name'] = f(df['name'])
+        df['race'] = f(df['race'])
+        df['office'] = f(df['office'])
+        mask = ((df['office'].str[:5] == 'USRep') &
+                 df['office'].str[-1].str.isnumeric() &
+                ~df['office'].str[-2].str.isnumeric())
+        df.loc[mask, 'office'] = df.loc[mask, 'office'].str[:-1] + df.loc[mask, 'office'].str[-1].str.rjust(2, '0')
 
 ######## correct differences between cntyvtd codes in assignements (US Census) and elections (TX Legislative Council) ########
         c = f'cntyvtd'

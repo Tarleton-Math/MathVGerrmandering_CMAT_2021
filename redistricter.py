@@ -82,7 +82,7 @@ graph_opts['refresh_all'] = (
 #     'assignments',
 #     'shapes',
 #     'census',
-#     'elections',
+    'elections',
 #     'nodes',
 #     'graph',
 )
@@ -98,6 +98,7 @@ graph_opts['refresh_tbl'] = (
 
 G = Graph(**graph_opts)
 
+assert 1==2
 ################# Run MCMC #################
 
 from src.mcmc import *
