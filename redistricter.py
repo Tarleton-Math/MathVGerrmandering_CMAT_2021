@@ -20,7 +20,7 @@ graph_opts = {
 
 mcmc_opts = {
     'user_name'             : 'cook',
-    'max_steps'             : 5000,
+    'max_steps'            : 2,
     'pop_diff_exp'          : 2,
     'pop_imbalance_target'  : 1.0,
     'pop_imbalance_stop'    : 'True',
@@ -32,7 +32,8 @@ mcmc_opts = {
 run_opts = {
     'seed_start'      : 0,
     'jobs_per_worker' : 1,
-    'workers'         : 16,
+    'workers'         : 2,
+
 }
 
 yes = (True, 't', 'true', 'y', 'yes')
@@ -97,19 +98,26 @@ graph_opts['refresh_tbl'] = (
 )
 
 G = Graph(**graph_opts)
-mcmc_opts['gpickle'] = G.gpickle
 
 ################# Run MCMC #################
 
 from src.mcmc import *
-from src.analysis import *
 import multiprocessing
 if os.getenv('PYTHONHASHSEED') == HASHSEED:
     print(f'hashseed == {HASHSEED} so results are ARE reproducible and WILL be saved to BigQuery')
 else:
     print(f'hashseed != {HASHSEED} so results are NOT reproducible and will NOT be saved to BigQuery')
-
     
+
+timestamp = str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_')
+results_stem = G.gpickle.stem[6:]
+mcmc_opts['gpickle'] = G.gpickle
+mcmc_opts['results_bq']   = root_bq  + f'.results.{results_stem}_{timestamp}'
+mcmc_opts['results_path'] = root_path / f'results/{results_stem}/{timestamp}'
+mcmc_opts['results_path'].mkdir(parents=True, exist_ok=True)
+bqclient.create_dataset(root_bq  + f'.results', exists_ok=True)
+
+
 def f(seed):
     idx = multiprocessing.current_process()._identity[0]
     time.sleep(idx / 100)
@@ -120,6 +128,8 @@ def f(seed):
     print(f'finished seed {seed} with pop_imbalance={M.pop_imbalance:.1f} after {M.step} steps and {time_formatter(time.time() - start)}')
 
     if os.getenv('PYTHONHASHSEED') == HASHSEED:
+#         M.save()
+        
         saved = False
         for i in range(1, 120):
             try:
@@ -135,24 +145,28 @@ with multiprocessing.Pool(int(run_opts['workers'])) as pool:
     a = int(run_opts['seed_start'])
     b = a + int(run_opts['jobs_per_worker']) * pool._processes
     seeds = list(range(a, b))
-#     print(f'I will run seeds {seeds}', flush=True)
-#     pool.map(f, seeds)
+    print(f'I will run seeds {seeds}', flush=True)
+    pool.map(f, seeds)
     
-nodes_tbl = G.nodes.tbl
-mcmc_tbl  = MCMC(seed=seeds[0], **mcmc_opts).tbl
-A = Analysis(nodes=nodes_tbl, mcmc=mcmc_tbl, seeds=seeds)
-if os.getenv('PYTHONHASHSEED') == HASHSEED:
-    for attempt in range(1, 6):
-        rpt(f'analysis attempt {attempt}')
-        try:
-            A.compute_results()
-            print(f'success!')
-            break
-        except:
-            rpt(f'failed')
-            new_tbl = nodes_tbl + '_copy'
-            bqclient.copy_table(nodes_tbl, new_tbl).result()
-            nodes_tbl = new_tbl
+from src.analysis import *
+results = mcmc_opts['results_bq']
+# results = 'cmat-315920.results.TX_2020_cntyvtd_cd_2021_09_06_03_35_51'
+
+# mcmc_tbl  = MCMC(seed=seeds[0], **mcmc_opts).tbl
+A = Analysis(nodes=G.nodes.tbl, results=results, seeds=seeds)
+A.compute_results()
+# if os.getenv('PYTHONHASHSEED') == HASHSEED:
+for attempt in range(1, 6):
+    rpt(f'analysis attempt {attempt}')
+    try:
+        A.compute_results()
+        print(f'success!')
+        break
+    except:
+        rpt(f'failed')
+        new_tbl = nodes_tbl + '_copy'
+        bqclient.copy_table(nodes_tbl, new_tbl).result()
+        nodes_tbl = new_tbl
         
 # cmd = f'gsutil -m cp -r {root_path}/results gs://cmat-315920-bucket'
 # os.system(cmd)

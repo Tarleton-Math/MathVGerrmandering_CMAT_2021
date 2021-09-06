@@ -1,20 +1,44 @@
-proj_id = 'cmat-315920'
-root_path = '/home/jupyter'
+proj_id   = 'cmat-315920'
+root_path = '/home/jupyter/'
+gcs_path  = 'math_for_unbiased_maps_tx'
 
-import google, time, datetime, dataclasses, typing, os, pathlib, shutil, urllib
+import time, datetime, dataclasses, typing, os, pathlib, shutil, urllib
 import zipfile as zf, numpy as np, pandas as pd, geopandas as gpd, networkx as nx
 import matplotlib.pyplot as plt, plotly.express as px
 from shapely.ops import orient
-from google.cloud import aiplatform, bigquery
 try:
-    from google.cloud.bigquery_storage import BigQueryReadClient
+    import google.cloud.bigquery, google.cloud.bigquery_storage
 except:
     os.system('pip install --upgrade google-cloud-bigquery-storage')
-    from google.cloud.bigquery_storage import BigQueryReadClient
+    os.system('pip install --upgrade google-cloud-bigquery')
+    import google.cloud.bigquery, google.cloud.bigquery_storage
 
 import warnings
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
 warnings.filterwarnings('ignore', message='.*Pyarrow could not determine the type of columns*')
+
+pd.set_option('display.max_columns', None)
+cred, proj = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+bqclient   = google.cloud.bigquery.Client(credentials=cred, project=proj)
+gcsclient  = google.cloud.storage .Client(credentials=cred, project=proj)
+
+root_path = pathlib.Path(root_path)
+code_path = pathlib.Path(os.getcwd())
+data_path = root_path / 'redistricting_data'
+
+root_bq  = proj_id
+data_bq  = root_bq  + '.redistricting_data'
+bqclient.create_dataset(data_bq , exists_ok=True)
+gcs_bucket = gcsclient.get_bucket(gcs_path)
+
+Levels = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd']
+District_types = ['cd', 'sldu', 'sldl']
+Years = [2010, 2020]
+concat_str = ' ... '
+meters_per_mile = 1609.344
+
+def to_gcs(file):
+    gcs_bucket.blob(str(file).replace(str(root_path)+'/', '')).upload_from_filename(file)
 
 def rpt(msg):
     print(msg, end=concat_str, flush=True)
@@ -109,9 +133,9 @@ def load_table(tbl, df=None, file=None, query=None, overwrite=True, preview_rows
         job = bqclient.load_table_from_dataframe(df, tbl).result()
     elif file is not None:
         with open(file, mode="rb") as f:
-            job = bqclient.load_table_from_file(f, tbl, job_config=bigquery.LoadJobConfig(autodetect=True)).result()
+            job = bqclient.load_table_from_file(f, tbl, job_config=google.cloud.bigquery.LoadJobConfig(autodetect=True)).result()
     elif query is not None:
-        job = bqclient.query(query, job_config=bigquery.QueryJobConfig(destination=tbl)).result()
+        job = bqclient.query(query, job_config=google.cloud.bigquery.QueryJobConfig(destination=tbl)).result()
     else:
         raise Exception('at least one of df, file, or query must be specified')
     if preview_rows > 0:
@@ -130,7 +154,6 @@ def time_formatter(t):
     h, m = divmod(t, 3600)
     m, s = divmod(m, 60)
     return f'{int(h)}hrs {int(m)}min {s:.2f}sec'
-
 
 def yr_to_congress(yr):
     return min(116, int(yr-1786)/2)
@@ -151,6 +174,11 @@ where
 def get_components(graph):
     return sorted([tuple(x) for x in nx.connected_components(graph)], key=lambda x:len(x), reverse=True)
 
+try:
+    states
+except:
+    print('getting states')
+    states = get_states()
 
 @dataclasses.dataclass
 class Base():
@@ -168,31 +196,35 @@ class Variable(Base):
     level : str = 'tabblock'
 
     def __post_init__(self):
-        a = f'{self.name}/{self.g.state.abbr}'
-        self.path = data_path / a
-        a = a.replace('/', '_')
+        self.path = data_path / f'{self.name}/{self.g.state.abbr}'
+        a = f'{self.name}_{self.g.state.abbr}'
         b = f'{a}_{self.yr}'
         c = f'{b}_{self.level}'
         d = f'{c}_{self.g.district_type}'
         self.zip     = self.path / f'{b}.zip'
         self.pq      = self.path / f'{b}.parquet'
-        self.raw     = f'{bq_dataset}.{b}_raw'
-        self.tbl     = f'{bq_dataset}.{c}'
         self.gpickle = self.path / f'{d}.gpickle'
+        self.raw     = f'{data_bq}.{b}_raw'
+        self.tbl     = f'{data_bq}.{c}'
         self.get()
+        os.chdir(code_path)
         print(f'success')
-
-
+        
+    def save_tbl(self):
+        df = read_table(tbl=self.tbl)
+        df.to_parquet(self.pq)
+        to_gcs(self.pq)
+        
+        
     def get_zip(self):
         try:
             self.zipfile = zf.ZipFile(self.zip)
             rpt(f'zip exists')
         except:
             try:
-                self.path.mkdir(parents=True, exist_ok=True)
-                os.chdir(self.path)
                 rpt(f'getting zip from {self.url}')
                 self.zipfile = zf.ZipFile(urllib.request.urlretrieve(self.url, self.zip)[0])
+                to_gcs(self.zip)
                 rpt(f'finished{concat_str}processing')
             except urllib.error.HTTPError:
                 raise Exception(f'n\nFAILED - BAD URL {self.url}\n\n')
@@ -204,10 +236,11 @@ class Variable(Base):
             delete_table(self.tbl)
             
         if self.name in self.g.refresh_all:
-#             delete_table(self.tbl)
             delete_table(self.raw)
             shutil.rmtree(self.path, ignore_errors=True)
     
+        self.path.mkdir(parents=True, exist_ok=True)
+        os.chdir(self.path)
         exists = dict()
         exists['df'] = hasattr(self, 'df')
         if exists['df']:
@@ -224,24 +257,7 @@ class Variable(Base):
 
 ############################################################################################################
     
-pd.set_option('display.max_columns', None)
-cred, proj = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-bqclient   = bigquery.Client(credentials=cred, project=proj)
-root_path  = pathlib.Path(root_path)
-data_path  = root_path / 'redistricting_data'
-bq_dataset = proj_id   +'.redistricting_data'
 
-Levels = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd']
-District_types = ['cd', 'sldu', 'sldl']
-Years = [2010, 2020]
-concat_str = ' ... '
-meters_per_mile = 1609.344
-
-try:
-    states
-except:
-    print('getting states')
-    states = get_states()
     
 
 Census_columns = {'joins':  ['fileid', 'stusab', 'chariter', 'cifsn', 'logrecno']}

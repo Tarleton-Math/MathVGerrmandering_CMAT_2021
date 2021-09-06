@@ -8,24 +8,38 @@ except:
 
 @dataclasses.dataclass
 class Analysis(Base):
-    nodes : str
-    mcmc  : str
-    seeds : typing.Any
+    nodes  : str
+    results: str
+    seeds  : typing.Any
         
     def __post_init__(self):
-        a = self.mcmc.split(".")
-        b = a[-1].split('_')[:-2]
-        self.base = f'{a[0]}.{a[1]}.{"_".join(b)}_seed'
-        b.append(str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_'))
-        self.abbr, self.yr, self.level, self.district_type, self.timestamp = b
-        self.tbl = f'{a[0]}.{a[1]}.{'_'.join(b)}'
+        self.tbl = self.results + '_results'
+        a = self.results.split(".")[-1].split('_')
+#         b = a.split('_')[:4]
+        self.abbr, self.yr, self.level, self.district_type = a[:4]
+        self.pq = root_path / f'results/{"_".join(a[:4])}/{"_".join(a[4:])}/results.parquet'
+        self.pq.parent.mkdir(parents=True, exist_ok=True)
+        
+        
+        print(self.tbl, self.pq)
+#         print(self.results)
+#         assert 1==2
+        
+        
+        
+#         a = self.mcmc.split(".")
+#         b = a[-1].split('_')[:-2]
+#         self.base = f'{a[0]}.{a[1]}.{"_".join(b)}_seed'
+#         b.append(str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_'))
+#         self.abbr, self.yr, self.level, self.district_type, self.timestamp = b
+#         self.tbl = f'{a[0]}.{a[1]}.{"_".join(b)}'
         
 
     def compute_results(self):
         u = "\nunion all\n"
-        summary_stack = u.join([f'select * from {self.base}_{str(seed).rjust(4, "0")}_summary' for seed in self.seeds])
-        stats_stack   = u.join([f'select * from {self.base}_{str(seed).rjust(4, "0")}_stats'   for seed in self.seeds])
-        plans_stack   = u.join([f'select * from {self.base}_{str(seed).rjust(4, "0")}_plans'   for seed in self.seeds])
+        summary_stack = u.join([f'select * from {self.results}_seed_{str(seed).rjust(4, "0")}_summary' for seed in self.seeds])
+        stats_stack   = u.join([f'select * from {self.results}_seed_{str(seed).rjust(4, "0")}_stats'   for seed in self.seeds])
+        plans_stack   = u.join([f'select * from {self.results}_seed_{str(seed).rjust(4, "0")}_plans'   for seed in self.seeds])
 
         cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
         query = f"""
@@ -78,8 +92,12 @@ order by
     seed, plan, {self.district_type}
 """
         load_table(tbl=self.tbl, query=query)
-        self.fetch_results()
-        self.save_results()
+        df = read_table(tbl=self.tbl)
+        df.to_parquet(self.pq)
+        to_gcs(self.pq)
+#         bqclient.extract_table(self.tbl, )
+#         self.fetch_results()
+#         self.save_results()
         
     def fetch_results(self):
         self.results = read_table(tbl=self.tbl)
@@ -90,86 +108,9 @@ order by
         return self.results
         
     def save_results(self):
-        self.file = f'results/{self.tbl.split(".")[-1]}.parquet'
-        self.results.to_parquet(str(root_path / self.file), index=False)#, partition_cols='seed')
-        self.results.to_parquet(f"gs://{proj_id}-bucket/{self.file}")
-        return self.results
+        self.results.to_parquet(results_path + 'results.parquet', index=False)
+        self.results.to_parquet(results_gcs  + 'results.parquet', index=False)
         
-        
-    
-#             fn = self.results_path / f'{self.run}_results.csv'
-#             self.results.to_csv(fn, index=False)
-#             rpt(f'results calulation for {self.seed} - SUCCESS')
-#         except Exception as e:
-#             rpt(f'results calulation for {self.seed} - FAIL {e}')
-    
-    
-#         try:
-# #             rpt(f'graph copy for {self.seed}')
-#             graph_source = root_path / f'redistricting_data/graph/{self.abbr}/graph_{self.run}.gpickle'
-#             graph_target = self.results_path / f'{self.run}_graph.gpickle'
-#             shutil.copy(graph_source, graph_target)
-# #             rpt(f'graph copy for {self.seed} - success')
-#         except Exception as e:
-# #             rpt(f'graph copy for {self.seed} - FAIL {e}')
-#             pass
-    
-    
-#         try:
-#             self.summary = read_table(tbl=self.tbl+'_summary').sort_values('plan')
-#             fn = self.results_path / f'{self.run}_summary.csv'
-#             self.summary.to_csv(fn, index=False)
-# #             rpt(f'summary copy for {self.seed} - succeed')
-#         except Exception as e:
-#             rpt(f'summary copy for {self.seed} - FAIL {e}')
-        
-#         try:
-#             self.plans = read_table(tbl=self.tbl+'_plans').sort_values('plan')
-#             fn = self.results_path / f'{self.run}_plans.csv'
-#             self.plans.to_csv(fn, index=False)
-# #             rpt(f'plans copy for {self.seed} - succeed')
-#         except Exception as e:
-#             rpt(f'plans copy for {self.seed} - FAIL {e}')
-
-#         try:
-#             cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['county', 'perim', 'polsby_popper', 'total_pop', 'density', 'polygon', 'point']]
-#             query = f"""
-# select
-#     D.*,
-#     case when aland > 0 then total_pop / aland else 0 end as density,
-#     {join_str(1).join([f'C.{c} as {c}' for c in cols])}
-# from (
-#     select
-#         A.{self.district_type},
-#         A.plan,
-#         {join_str(2).join([f'sum(B.{c}) as {c}' for c in cols])}
-#     from
-#         {self.tbl+'_plans'} as A
-#     left join
-#         {self.nodes} as B
-#     on
-#         A.geoid = B.geoid
-#     group by 
-#         1, 2
-#     ) as C
-# left join 
-#     {self.tbl+'_stats'} as D
-# on 
-#     C.{self.district_type} = D.{self.district_type} and C.plan = D.plan
-# order by
-#     plan, {self.district_type}
-# """
-#             self.results = run_query(query)
-# #             cols = self.results.columns.tolist()
-# #             self.results.columns = [cols[1], cols[0]] + cols[2:]
-
-#             fn = self.results_path / f'{self.run}_results.csv'
-#             self.results.to_csv(fn, index=False)
-# #             rpt(f'results calulation for {self.seed} - SUCCESS')
-#         except Exception as e:
-#             rpt(f'results calulation for {self.seed} - FAIL {e}')
-
-
 
 
 

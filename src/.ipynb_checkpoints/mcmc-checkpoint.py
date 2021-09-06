@@ -2,9 +2,11 @@ from . import *
 
 @dataclasses.dataclass
 class MCMC(Base):
-    gpickle               : str
     max_steps             : int
     user_name             : str
+    gpickle               : str
+    results_bq            : str
+    results_path          : str    
     seed                  : int = 1
     new_districts         : int = 0
     anneal                : float = 0.0
@@ -17,16 +19,9 @@ class MCMC(Base):
     def __post_init__(self):
         self.seed = int(self.seed)
         self.rng = np.random.default_rng(self.seed)
-        
-        self.gpickle = pathlib.Path(self.gpickle)
-        a = self.gpickle.stem.split('_')[1:]
-        self.abbr, self.yr, self.level, self.district_type = a
-        b = '_'.join(a)
-#         label = str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_')
-        label = 'seed_' + str(self.seed).rjust(4, "0")
-        self.tbl = f'{proj_id}.redistricting_results_{self.user_name}.{b}_{label}'
+        self.seed = 'seed_' + str(self.seed).rjust(4, "0")
+        self.abbr, self.yr, self.level, self.district_type = self.gpickle.stem.split('_')[1:]
         self.graph = nx.read_gpickle(self.gpickle)
-        self.gpickle_out = f'{str(self.gpickle)[:-8]}_{label}.gpickle'
         nx.set_node_attributes(self.graph, self.seed, 'seed')
         
         if self.new_districts > 0:
@@ -130,10 +125,12 @@ class MCMC(Base):
 
 
     def save(self):
-        nx.write_gpickle(self.graph, self.gpickle_out)
-        load_table(tbl=self.tbl+'_plans'  , df=self.plans    , preview_rows=0)
-        load_table(tbl=self.tbl+'_stats'  , df=self.stats    , preview_rows=0)
-        load_table(tbl=self.tbl+'_summary', df=self.summaries, preview_rows=0)
+        self.file = self.results_path / f'graph_{self.seed}.gpickle'
+        nx.write_gpickle(self.graph, self.file)
+        to_gcs(self.file)
+        load_table(tbl=self.results_bq + f'_{self.seed}_plans'  , df=self.plans    , preview_rows=0)
+        load_table(tbl=self.results_bq + f'_{self.seed}_stats'  , df=self.stats    , preview_rows=0)
+        load_table(tbl=self.results_bq + f'_{self.seed}_summary', df=self.summaries, preview_rows=0)
 
 
     def recomb(self):

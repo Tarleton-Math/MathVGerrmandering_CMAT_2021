@@ -129,3 +129,4 @@ from (
     )
 """
         load_table(self.tbl, query=query, preview_rows=0)
+        self.save_tbl()

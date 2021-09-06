@@ -42,6 +42,9 @@ class Graph(Variable):
             self.refresh_all.add(self.name)
         super().__post_init__()
         
+#         self.gpickle = data_path / f'graph/{self.abbr_self}/graph_{self.abbr_self}_{self.yr}_{self.level}_{self.district.type}.gpickle'
+#         self.gpickle.parent.mkdir(parents=True, exist_ok=True)
+        
     def get(self):
         s = set(self.refresh_tbl).union(self.refresh_all).difference(('nodes', 'graph'))
         if len(s) > 0:
@@ -64,8 +67,9 @@ class Graph(Variable):
             except:
                 rpt(f'creating graph')
                 self.process()
-                self.gpickle.parent.mkdir(parents=True, exist_ok=True)
+#                 self.gpickle.parent.mkdir(parents=True, exist_ok=True)
                 nx.write_gpickle(self.graph, self.gpickle)
+                to_gcs(self.gpickle)
         return self
     
     

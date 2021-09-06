@@ -42,5 +42,5 @@ class Assignments(Variable):
         self.df.insert(1, 'tract'   , c[:11])
         self.df.insert(1, 'bg'      , c[:12])
         self.df.insert(1, 'tabblock', c[:15])
-        self.df.to_parquet(self.pq)
         load_table(tbl=self.tbl, df=self.df, preview_rows=0)
+        self.save_tbl()

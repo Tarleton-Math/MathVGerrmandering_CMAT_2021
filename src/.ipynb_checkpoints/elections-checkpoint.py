@@ -22,7 +22,6 @@ class Elections(Variable):
                 rpt(f'creating raw table')
                 self.process_raw()
             rpt(f'creating table')
-            print(self.tbl)
             self.process()
         return self
 
@@ -33,7 +32,6 @@ class Elections(Variable):
         L = []
         for fn in self.zipfile.namelist():
             if fn[-k:]==ext:
-                rpt(fn)
                 df = extract_file(self.zipfile, fn, sep=',')
                 df = (df.astype({'votes':int, 'fips':str, 'vtd':str})
                       .query('votes > 0')
@@ -71,7 +69,6 @@ class Elections(Variable):
             raise Exception('Unmatched election results')
         
         self.df = df.drop(columns=['fips', 'vtd', 'incumbent', 'alt']).rename(columns={'name':'candidate'})
-        self.df.to_parquet(self.pq)
         load_table(self.raw, df=self.df, preview_rows=0)
         
 
@@ -158,3 +155,4 @@ on
         delete_table(tbl_temp)
         for t in tbl_chunks:
             delete_table(t)
+        self.save_tbl()
