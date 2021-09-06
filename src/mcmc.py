@@ -16,10 +16,9 @@ class MCMC(Base):
     
 
     def __post_init__(self):
-        self.seed = int(self.seed)
-        self.rng = np.random.default_rng(self.seed)
-        self.seed = 'seed_' + str(self.seed).rjust(4, "0")
+        self.rng = np.random.default_rng(int(self.seed))
         self.abbr, self.yr, self.level, self.district_type = self.gpickle.stem.split('_')[1:]
+
         self.graph = nx.read_gpickle(self.gpickle)
         nx.set_node_attributes(self.graph, self.seed, 'seed')
         
@@ -124,12 +123,16 @@ class MCMC(Base):
 
 
     def save(self):
-        self.file = self.results_path / f'graph_{self.seed}.gpickle'
+        self.results_path.mkdir(parents=True, exist_ok=True)
+        ds = '.'.join(self.results_bq.split('.')[:-1])
+        bqclient.create_dataset(ds, exists_ok=True)
+
+        self.file = self.results_path / f'graph.gpickle'
         nx.write_gpickle(self.graph, self.file)
         to_gcs(self.file)
-        load_table(tbl=self.results_bq + f'_{self.seed}_plans'  , df=self.plans    , preview_rows=0)
-        load_table(tbl=self.results_bq + f'_{self.seed}_stats'  , df=self.stats    , preview_rows=0)
-        load_table(tbl=self.results_bq + f'_{self.seed}_summary', df=self.summaries, preview_rows=0)
+        load_table(tbl=self.results_bq + f'_plans'  , df=self.plans    , preview_rows=0)
+        load_table(tbl=self.results_bq + f'_stats'  , df=self.stats    , preview_rows=0)
+        load_table(tbl=self.results_bq + f'_summary', df=self.summaries, preview_rows=0)
 
 
     def recomb(self):

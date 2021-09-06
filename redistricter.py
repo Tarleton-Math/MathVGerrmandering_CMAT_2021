@@ -21,7 +21,7 @@ graph_opts = {
 mcmc_opts = {
     'max_steps'            : 5000,
     'pop_diff_exp'          : 2,
-    'pop_imbalance_target'  : 1.0,
+    'pop_imbalance_target'  : 0.5,
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
     'report_period'         : 50,
@@ -30,7 +30,7 @@ mcmc_opts = {
 
 run_opts = {
     'seed_start'      : 0,
-    'jobs_per_worker' : 5,
+    'jobs_per_worker' : 1,
     'workers'         : 8,
 
 }
@@ -82,7 +82,7 @@ graph_opts['refresh_all'] = (
 #     'assignments',
 #     'shapes',
 #     'census',
-    'elections',
+#     'elections',
 #     'nodes',
 #     'graph',
 )
@@ -110,25 +110,29 @@ else:
 
 timestamp = str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_')
 results_stem = G.gpickle.stem[6:]
-mcmc_opts['gpickle'] = G.gpickle
-mcmc_opts['results_bq']   = root_bq  + f'.results.{results_stem}_{timestamp}'
-mcmc_opts['results_path'] = root_path / f'results/{results_stem}/{timestamp}'
-mcmc_opts['results_path'].mkdir(parents=True, exist_ok=True)
-bqclient.create_dataset(root_bq  + f'.results', exists_ok=True)
+# mcmc_opts['gpickle'] = G.gpickle
+# mcmc_opts['results_bq']   = root_bq  + f'.results.{results_stem}_{timestamp}'
+# mcmc_opts['results_path'] = root_path / f'results/{results_stem}/{timestamp}'
+# mcmc_opts['results_path'].mkdir(parents=True, exist_ok=True)
+# bqclient.create_dataset(root_bq  + f'.results', exists_ok=True)
 
 
 def f(seed):
     idx = multiprocessing.current_process()._identity[0]
     time.sleep(idx / 100)
     print(f'starting seed {seed}', flush=True)
+    results_bq   = root_bq   + f'.results.{results_stem}_{seed}'
+    results_path = root_path /  f'results/{results_stem}/{seed}'
+    
     start = time.time()
-    M = MCMC(seed=seed, **mcmc_opts)
+    M = MCMC(seed=seed, results_bq=results_bq, results_path=results_path, gpickle=G.gpickle, **mcmc_opts)
     M.run_chain()
     print(f'finished seed {seed} with pop_imbalance={M.pop_imbalance:.1f} after {M.step} steps and {time_formatter(time.time() - start)}')
 
     if os.getenv('PYTHONHASHSEED') == HASHSEED:
+#         M.save()
         saved = False
-        for i in range(1, 120):
+        for i in range(1, 60):
             try:
                 M.save()
 #                 print(f'seed {seed} save try {i} succeeded')
@@ -141,26 +145,26 @@ def f(seed):
 with multiprocessing.Pool(int(run_opts['workers'])) as pool:
     a = int(run_opts['seed_start'])
     b = a + int(run_opts['jobs_per_worker']) * pool._processes
-    seeds = list(range(a, b))
+    seeds = [str(s).rjust(4,'0') for s in range(a, b)]
     print(f'I will run seeds {seeds}', flush=True)
     pool.map(f, seeds)
     
-from src.analysis import *
-results = mcmc_opts['results_bq']
-# results = 'cmat-315920.results.TX_2020_cntyvtd_cd_2021_09_06_03_35_51'
+# from src.analysis import *
+# results = mcmc_opts['results_bq']
+# # results = 'cmat-315920.results.TX_2020_cntyvtd_cd_2021_09_06_03_35_51'
 
-A = Analysis(nodes=G.nodes.tbl, results=results, seeds=seeds)
-A.compute_results()
-for attempt in range(1, 6):
-    rpt(f'analysis attempt {attempt}')
-    try:
-        A.compute_results()
-        print(f'success!')
-        break
-    except:
-        rpt(f'failed')
-        new_tbl = nodes_tbl + '_copy'
-        bqclient.copy_table(nodes_tbl, new_tbl).result()
-        nodes_tbl = new_tbl
+# A = Analysis(nodes=G.nodes.tbl, results=results, seeds=seeds)
+# A.compute_results()
+# for attempt in range(1, 6):
+#     rpt(f'analysis attempt {attempt}')
+#     try:
+#         A.compute_results()
+#         print(f'success!')
+#         break
+#     except:
+#         rpt(f'failed')
+#         new_tbl = nodes_tbl + '_copy'
+#         bqclient.copy_table(nodes_tbl, new_tbl).result()
+#         nodes_tbl = new_tbl
         
 print(f'total time elapsed = {time_formatter(time.time() - start_time)}')
