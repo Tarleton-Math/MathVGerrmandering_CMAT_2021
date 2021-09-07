@@ -143,7 +143,7 @@ b = a + run_opts['jobs_per_worker'] * run_opts['workers']
 seeds = [str(s).rjust(4,'0') for s in range(a, b)]
 
 with multiprocessing.Pool(run_opts['workers']) as pool:
-    print(f'I will run seeds {seeds}', flush=True)
+#     print(f'I will run seeds {seeds}', flush=True)
     pool.map(f, seeds)
     
 # from src.analysis import *
