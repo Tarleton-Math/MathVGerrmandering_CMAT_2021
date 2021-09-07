@@ -95,8 +95,8 @@ graph_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-    'nodes',
-    'graph',
+#     'nodes',
+#     'graph',
 )
 
 G = Graph(**graph_opts)
