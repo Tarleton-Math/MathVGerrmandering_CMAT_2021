@@ -108,14 +108,13 @@ class MCMC(Base):
                 rpt(msg)
                 break
             if self.step % 500 == 0:
-                self.save()
-        if len(self.plans) > 0:
-            self.save()
+                self.save(gcs=False)
+        self.save(gcs=True)
 #         print('MCMC done')
 
 
 
-    def save(self):
+    def save(self, gcs=False):
         if self.results_bq is None:
             return
         self.results_path.mkdir(parents=True, exist_ok=True)
@@ -123,26 +122,32 @@ class MCMC(Base):
         nx.write_gpickle(self.graph, self.file)
         to_gcs(self.file)
         
-        self.plans     = pd.concat(self.plans    , axis=0).rename_axis('geoid').reset_index()
-        self.stats     = pd.concat(self.stats    , axis=0).rename_axis(self.district_type).reset_index()
-        self.summaries = pd.concat(self.summaries, axis=0)
-        
         def reorder(df):
             idx = [c for c in ['seed', 'plan'] if c in df.columns]
             return df[idx + [c for c in df.columns if c not in idx]]
 
-        for r in ['plans', 'stats', 'summaries']:
-            saved = False
-            for i in range(1, 60):
-                try:
-                    load_table(tbl=self.results_bq + f'_{r}', df=reorder(self[r]), overwrite=self.overite_tbl)
-                    self[r] = list()
-                    saved = True
-                    break
-                except:
-                    time.sleep(1)
-            assert saved, f'I tried to write the result of seed {self.seed} {i} times without success - giving up'
-        self.overite_tbl = False
+        tbls = {nm: self.results_bq+f'_{nm}' for nm in ['plans', 'stats', 'summaries']}
+        if len(self.plans) > 0:
+            self.plans     = pd.concat(self.plans    , axis=0).rename_axis('geoid').reset_index()
+            self.stats     = pd.concat(self.stats    , axis=0).rename_axis(self.district_type).reset_index()
+            self.summaries = pd.concat(self.summaries, axis=0)
+
+            for nm, tbl in tbls.items():
+                saved = False
+                for i in range(1, 60):
+                    try:
+                        load_table(tbl=tlb, df=reorder(self[nm]), overwrite=self.overite_tbl)
+                        self[nm] = list()
+                        saved = True
+                        break
+                    except:
+                        time.sleep(1)
+                assert saved, f'I tried to write the result of seed {self.seed} {i} times without success - giving up'
+            self.overite_tbl = False
+        
+        if gcs:
+            for nm, tbl in tbls.items():
+                to_gcs(tbl)
 
 
     def recomb(self):

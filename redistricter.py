@@ -15,7 +15,7 @@ start_time = time.time()
 graph_opts = {
     'abbr'             : 'TX',
     'level'            : 'cntyvtd',
-    'district_type'    : 'sldu',
+    'district_type'    : 'cd',
 }
 
 mcmc_opts = {
@@ -28,7 +28,7 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'      : 0,
+    'seed_start'      : 1000,
     'jobs_per_worker' : 100,
     'workers'         : 80,
 }
