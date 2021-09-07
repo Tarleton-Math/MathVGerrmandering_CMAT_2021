@@ -25,7 +25,6 @@ mcmc_opts = {
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
     'report_period'         : 50,
-#     'new_districts'         : 0,
 }
 
 run_opts = {
