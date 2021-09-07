@@ -119,7 +119,6 @@ class MCMC(Base):
         if self.results_bq is None:
             return
         self.results_path.mkdir(parents=True, exist_ok=True)
-
         self.file = self.results_path / f'graph.gpickle'
         nx.write_gpickle(self.graph, self.file)
         to_gcs(self.file)
