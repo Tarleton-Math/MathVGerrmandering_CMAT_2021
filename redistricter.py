@@ -32,7 +32,6 @@ run_opts = {
     'seed_start'      : 0,
     'jobs_per_worker' : 100,
     'workers'         : 80,
-
 }
 
 yes = (True, 't', 'true', 'y', 'yes')
