@@ -29,8 +29,8 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'      : 800,
-    'jobs_per_worker' : 5,
+    'seed_start'      : 0,
+    'jobs_per_worker' : 100,
     'workers'         : 80,
 
 }
@@ -134,10 +134,12 @@ def f(seed):
     M.run_chain()
     print(f'finished seed {seed} with pop_imbalance={M.pop_imbalance:.1f} after {M.step} steps and {time_formatter(time.time() - start)}')
 
-with multiprocessing.Pool(int(run_opts['workers'])) as pool:
-    a = int(run_opts['seed_start'])
-    b = a + int(run_opts['jobs_per_worker']) * pool._processes
-    seeds = [str(s).rjust(4,'0') for s in range(a, b)]
+
+a = run_opts['seed_start']
+b = a + run_opts['jobs_per_worker'] * run_opts['workers']
+seeds = [str(s).rjust(4,'0') for s in range(a, b)]
+
+with multiprocessing.Pool(run_opts['workers']) as pool:
     print(f'I will run seeds {seeds}', flush=True)
     pool.map(f, seeds)
     
