@@ -60,7 +60,7 @@ graph_opts['election_filters'] = (
     "left(office, 5)='USRep' and race='general'",
 )
 
-for opt in ['max_steps', 'pop_diff_exp', 'report_period', 'new_districts']:
+for opt in ['max_steps', 'pop_diff_exp', 'report_period']:
     mcmc_opts[opt] = int(mcmc_opts[opt])
 
 for opt in ['pop_imbalance_target', 'anneal']:
