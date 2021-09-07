@@ -25,7 +25,7 @@ mcmc_opts = {
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
     'report_period'         : 50,
-    'new_districts'         : 2,
+#     'new_districts'         : 0,
 }
 
 run_opts = {
@@ -72,6 +72,11 @@ if mcmc_opts['pop_imbalance_stop'].lower() in yes:
     mcmc_opts['pop_imbalance_stop'] = True
 else:
     mcmc_opts['pop_imbalance_stop'] = False
+    
+if graph_opts['district_type'] == 'cd':
+    mcmc_opts['new_districts'] = 2
+else:
+    mcmc_opts['new_districts'] = 0
     
 for opt in ['seed_start', 'jobs_per_worker', 'workers']:
     run_opts[opt] = int(run_opts[opt])
