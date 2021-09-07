@@ -43,7 +43,7 @@ class MCMC(Base):
         return tuple(sorted(tuple((min(u,v), max(u,v)) for u, v in G.edges)))
     
     def get_districts(self):
-        grp = self.nodes_df().groupby('cd')
+        grp = self.nodes_df().groupby(self.district_type)
         self.districts = {k:tuple(sorted(v)) for k,v in grp.groups.items()}
         self.partition = tuple(sorted(self.districts.values()))
         self.hash = self.partition.__hash__()

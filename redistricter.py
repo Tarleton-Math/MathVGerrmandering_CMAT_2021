@@ -15,11 +15,11 @@ start_time = time.time()
 graph_opts = {
     'abbr'             : 'TX',
     'level'            : 'cntyvtd',
-    'district_type'    : 'cd',
+    'district_type'    : 'sldu',
 }
 
 mcmc_opts = {
-    'max_steps'            : 6,
+    'max_steps'            : 5000,
     'pop_diff_exp'          : 2,
     'pop_imbalance_target'  : 0.5,
     'pop_imbalance_stop'    : 'True',
@@ -29,9 +29,9 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'      : 2000,
-    'jobs_per_worker' : 1,
-    'workers'         : 1,
+    'seed_start'      : 800,
+    'jobs_per_worker' : 5,
+    'workers'         : 80,
 
 }
 
@@ -95,8 +95,8 @@ graph_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-#     'nodes',
-#     'graph',
+    'nodes',
+    'graph',
 )
 
 G = Graph(**graph_opts)
