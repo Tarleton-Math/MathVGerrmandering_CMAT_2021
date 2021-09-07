@@ -80,6 +80,7 @@ class MCMC(Base):
 
     def run_chain(self):
         self.step = 0
+        self.overite_tbl = True
         nx.set_node_attributes(self.graph, self.step, 'plan')
         self.get_stats()
         self.plans      = [self.nodes_df()[['seed', 'plan', self.district_type]]]
@@ -106,25 +107,45 @@ class MCMC(Base):
             else:
                 rpt(msg)
                 break
+            if self.step % 500 == 0:
+                self.save()
+        if len(self.plans) > 0:
+            self.save()
 #         print('MCMC done')
 
-        def reorder(df):
-            idx = [c for c in ['seed', 'plan'] if c in df.columns]
-            return df[idx + [c for c in df.columns if c not in idx]]
-        self.plans     = reorder(pd.concat(self.plans, axis=0).rename_axis('geoid').reset_index())
-        self.stats     = reorder(pd.concat(self.stats, axis=0).rename_axis(self.district_type).reset_index())
-        self.summaries = reorder(pd.concat(self.summaries, axis=0))
 
 
     def save(self):
+        if self.results_bq is None:
+            return
         self.results_path.mkdir(parents=True, exist_ok=True)
+        ds = '.'.join(self.results_bq.split('.')[:-1])
+        bqclient.create_dataset(ds, exists_ok=True)
 
         self.file = self.results_path / f'graph.gpickle'
         nx.write_gpickle(self.graph, self.file)
         to_gcs(self.file)
-        load_table(tbl=self.results_bq + f'_plans'  , df=self.plans    , preview_rows=0)
-        load_table(tbl=self.results_bq + f'_stats'  , df=self.stats    , preview_rows=0)
-        load_table(tbl=self.results_bq + f'_summary', df=self.summaries, preview_rows=0)
+        
+        self.plans     = pd.concat(self.plans    , axis=0).rename_axis('geoid').reset_index()
+        self.stats     = pd.concat(self.stats    , axis=0).rename_axis(self.district_type).reset_index()
+        self.summaries = pd.concat(self.summaries, axis=0)
+        
+        def reorder(df):
+            idx = [c for c in ['seed', 'plan'] if c in df.columns]
+            return df[idx + [c for c in df.columns if c not in idx]]
+
+        for r in ['plans', 'stats', 'summaries']:
+            saved = False
+            for i in range(1, 60):
+                try:
+                    load_table(tbl=self.results_bq + f'_{r}', df=reorder(self[r]), overwrite=self.overite_tbl)
+                    self[r] = list()
+                    saved = True
+                    break
+                except:
+                    time.sleep(1)
+            assert saved, f'I tried to write the result of seed {self.seed} {i} times without success - giving up'
+        self.overite_tbl = False
 
 
     def recomb(self):
