@@ -115,26 +115,32 @@ if save:
     print(f'hashseed == {HASHSEED} so results are ARE reproducible and WILL be saved to BigQuery')
 else:
     print(f'hashseed != {HASHSEED} so results are NOT reproducible and will NOT be saved to BigQuery')
-    
-def f(seed):
-    idx = multiprocessing.current_process()._identity[0]
-    time.sleep(idx / 100)
+
+def f(seed):    
     print(f'starting seed {seed}', flush=True)
     start = time.time()
     M = MCMC(seed=seed, gpickle=G.gpickle, save=save, **mcmc_opts)
     M.run_chain()
     print(f'finished seed {seed} with pop_imbalance={M.pop_imbalance:.1f} after {M.step} steps and {time_formatter(time.time() - start)}')
 
+    
+def multi_f(seed):
+    idx = multiprocessing.current_process()._identity[0]
+    time.sleep(idx / 100)
+    f(seed)
+
 
 a = run_opts['seed_start']
 b = a + run_opts['jobs_per_worker'] * run_opts['workers']
 seeds = [str(s).rjust(7,'0') for s in range(a, b)]
+print(f'I will run seeds {seeds}', flush=True)
+
+f(seeds[0])
+# with multiprocessing.Pool(run_opts['workers']) as pool:
+#     pool.map(multi_f, seeds)
 
 
-with multiprocessing.Pool(run_opts['workers']) as pool:
-#     print(f'I will run seeds {seeds}', flush=True)
-    pool.map(f, seeds)
-    
+
 # from src.analysis import *
 # results = mcmc_opts['results_bq']
 # # results = 'cmat-315920.results.TX_2020_cntyvtd_cd_2021_09_06_03_35_51'
