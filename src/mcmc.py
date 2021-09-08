@@ -109,7 +109,7 @@ class MCMC(Base):
                 if self.step % self.report_period == 0:
                     print(msg)
                 if self.step % self.save_period == 0:
-                    self.save_results(gcs=False)
+                    self.save_results()
                 if self.pop_imbalance_stop:
                     if self.pop_imbalance < self.pop_imbalance_target:
 #                         rpt(f'pop_imbalance_target {self.pop_imbalance_target} satisfied - stopping')

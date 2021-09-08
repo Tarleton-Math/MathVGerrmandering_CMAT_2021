@@ -26,6 +26,7 @@ mcmc_opts = {
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
     'report_period'         : 500,
+    'save_period'           : 500,
 }
 
 run_opts = {
