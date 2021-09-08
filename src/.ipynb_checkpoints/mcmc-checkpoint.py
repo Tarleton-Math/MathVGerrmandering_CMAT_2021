@@ -4,9 +4,8 @@ from . import *
 class MCMC(Base):
     max_steps             : int
     gpickle               : str
-    results_bq            : str
-    results_path          : str    
-    seed                  : int = 1
+    save                  : bool = True
+    seed                  : int = 0
     new_districts         : int = 0
     anneal                : float = 0.0
     pop_diff_exp          : int = 0
@@ -16,9 +15,14 @@ class MCMC(Base):
     
 
     def __post_init__(self):
+        self.results_stem = self.gpickle.stem[6:]
+        self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')
+        ds = f'{root_bq}.{self.results_stem}'
+        bqclient.create_dataset(ds, exists_ok=True)
+        self.results_bq = ds + f'.{self.results_stem}_{self.seed}'
+        self.results_path = root_path / f'results/{self.results_stem}/{self.results_stem}_{self.seed}/'
+        
         self.rng = np.random.default_rng(int(self.seed))
-        self.abbr, self.yr, self.level, self.district_type = self.gpickle.stem.split('_')[1:]
-
         self.graph = nx.read_gpickle(self.gpickle)
         nx.set_node_attributes(self.graph, self.seed, 'seed')
         
@@ -31,6 +35,8 @@ class MCMC(Base):
         self.num_districts = len(self.districts)
         self.pop_total = self.sum_nodes(self.graph, 'total_pop')
         self.pop_ideal = self.pop_total / self.num_districts
+        
+        
 
     def nodes_df(self, G=None):
         if G is None:
@@ -100,6 +106,9 @@ class MCMC(Base):
 #                 print('success')
                 if self.step % self.report_period == 0:
                     print(msg)
+                if self.step % 50 == 0:
+                    self.save_results(gcs=False)
+                    print('saving')
                 if self.pop_imbalance_stop:
                     if self.pop_imbalance < self.pop_imbalance_target:
 #                         rpt(f'pop_imbalance_target {self.pop_imbalance_target} satisfied - stopping')
@@ -107,20 +116,18 @@ class MCMC(Base):
             else:
                 rpt(msg)
                 break
-            if self.step % 500 == 0:
-                self.save(gcs=False)
-        self.save(gcs=True)
+        self.save_results(gcs=True)
 #         print('MCMC done')
 
 
 
-    def save(self, gcs=False):
+    def save_results(self, gcs=False):
         if self.results_bq is None:
             return
         self.results_path.mkdir(parents=True, exist_ok=True)
-        self.file = self.results_path / f'graph.gpickle'
-        nx.write_gpickle(self.graph, self.file)
-        to_gcs(self.file)
+        self.graph_file = self.results_path / f'graph.gpickle'
+        nx.write_gpickle(self.graph, self.graph_file)
+        to_gcs(self.graph_file)
         
         def reorder(df):
             idx = [c for c in ['seed', 'plan'] if c in df.columns]
@@ -133,10 +140,11 @@ class MCMC(Base):
             self.summaries = pd.concat(self.summaries, axis=0)
 
             for nm, tbl in tbls.items():
+#                 load_table(tbl=tbl, df=reorder(self[nm]), overwrite=self.overite_tbl)
                 saved = False
                 for i in range(1, 60):
                     try:
-                        load_table(tbl=tlb, df=reorder(self[nm]), overwrite=self.overite_tbl)
+                        load_table(tbl=tbl, df=reorder(self[nm]), overwrite=self.overite_tbl)
                         self[nm] = list()
                         saved = True
                         break
@@ -145,9 +153,17 @@ class MCMC(Base):
                 assert saved, f'I tried to write the result of seed {self.seed} {i} times without success - giving up'
             self.overite_tbl = False
         
-        if gcs:
-            for nm, tbl in tbls.items():
-                to_gcs(tbl)
+#         if gcs:
+#             for nm, tbl in tbls.items():
+#                 extract_job = bqclient.extract_table(
+#                     tbl,
+#                     destination_uri,
+#                     # Location must match that of the source table.
+#                     location="US",
+#                 )  # API request
+#                 extract_job.result()  # Waits for job to complete.
+
+#                 to_gcs(tbl)
 
 
     def recomb(self):

@@ -20,7 +20,7 @@ graph_opts = {
 }
 
 mcmc_opts = {
-    'max_steps'             : 200,
+    'max_steps'            : 5000,
     'pop_diff_exp'          : 2,
     'pop_imbalance_target'  : 0.5,
     'pop_imbalance_stop'    : 'True',
@@ -29,9 +29,9 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'      : 9000,
-    'jobs_per_worker' : 1,
-    'workers'         : 2,
+    'seed_start'      : 1000,
+    'jobs_per_worker' : 100,
+    'workers'         : 80,
 }
 
 yes = (True, 't', 'true', 'y', 'yes')
@@ -109,19 +109,31 @@ G = Graph(**graph_opts)
 
 from src.mcmc import *
 import multiprocessing
-
-save = os.getenv('PYTHONHASHSEED') == HASHSEED
-if save:
+if os.getenv('PYTHONHASHSEED') == HASHSEED:
     print(f'hashseed == {HASHSEED} so results are ARE reproducible and WILL be saved to BigQuery')
 else:
     print(f'hashseed != {HASHSEED} so results are NOT reproducible and will NOT be saved to BigQuery')
     
+# timestamp = str(pd.Timestamp.now().round("s")).replace(' ','_').replace('-','_').replace(':','_')
+# ds = root_bq + '.results'
+# bqclient.create_dataset(ds, exists_ok=True)
+# results_stem = G.gpickle.stem[6:]
+# results_bq = ds + f'.{results_stem}'
+# results_path = root_path / f'results/{results_stem}'
+
 def f(seed):
     idx = multiprocessing.current_process()._identity[0]
     time.sleep(idx / 100)
     print(f'starting seed {seed}', flush=True)
+    if os.getenv('PYTHONHASHSEED') == HASHSEED:
+        results_bq   = root_bq   + f'.results.{results_stem}_{seed}'
+        results_path = root_path /  f'results/{results_stem}/{seed}'
+    else:
+        results_bq   = None
+        results_path = None
+    
     start = time.time()
-    M = MCMC(seed=seed, gpickle=G.gpickle, save=save, **mcmc_opts)
+    M = MCMC(seed=seed, results_bq=results_bq, results_path=results_path, gpickle=G.gpickle, **mcmc_opts)
     M.run_chain()
     print(f'finished seed {seed} with pop_imbalance={M.pop_imbalance:.1f} after {M.step} steps and {time_formatter(time.time() - start)}')
 
@@ -129,7 +141,6 @@ def f(seed):
 a = run_opts['seed_start']
 b = a + run_opts['jobs_per_worker'] * run_opts['workers']
 seeds = [str(s).rjust(4,'0') for s in range(a, b)]
-
 
 with multiprocessing.Pool(run_opts['workers']) as pool:
 #     print(f'I will run seeds {seeds}', flush=True)
@@ -139,7 +150,7 @@ with multiprocessing.Pool(run_opts['workers']) as pool:
 # results = mcmc_opts['results_bq']
 # # results = 'cmat-315920.results.TX_2020_cntyvtd_cd_2021_09_06_03_35_51'
 
-# A = Analysis(nodes=G.nodes.tbl, seeds=seeds)
+# A = Analysis(nodes=G.nodes.tbl, results=results, seeds=seeds)
 # A.compute_results()
 # for attempt in range(1, 6):
 #     rpt(f'analysis attempt {attempt}')

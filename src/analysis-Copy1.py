@@ -1,58 +1,42 @@
 from . import *
 
+try:
+    import pandas_bokeh
+except:
+    os.system('pip install --upgrade pandas-bokeh')
+    import pandas_bokeh
+
 @dataclasses.dataclass
 class Analysis(Base):
-    nodes_tbl : str
+    nodes     : str
+    results_bq: str
+    seeds     : typing.Any
         
     def __post_init__(self):
-        self.results_stem = self.nodes_tbl.split('.')[-1][6:]
-        self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')
-#         bqclient.create_dataset(ds, exists_ok=True)
-#         self.results_bq = ds + f'.{results_stem}_{self.seed}'
-#         self.results_path = root_path / f'results/{results_stem}/{results_stem}_{self.seed}/'
+        results_stem = self.results_bq.split(".")[-1]
+        self.abbr, self.yr, self.level, self.district_type = results_stem.split('_')
 
-        
-        
-        
-#         self.seeds_list = list()
-#         self.bq_list = list()
-#         for seed in self.seeds:
-#             tbl = self.results_bq + f'_{seed}_'
-#             if check_table(tbl + 'plans'):
-#                 self.seeds_list.append(int(seed))
-#                 self.bq_list.append(tbl)
+        self.seeds_list = list()
+        self.bq_list = list()
+        for seed in self.seeds:
+            tbl = self.results_bq + f'_{seed}_'
+            if check_table(tbl + 'plans'):
+                self.seeds_list.append(int(seed))
+                self.bq_list.append(tbl)
 
-#         a, b = min(self.seeds_list), max(self.seeds_list)
-#         seeds_range = f'{str(a).rjust(4, "0")}_{str(b).rjust(4, "0")}'
-#         if all([s in self.seeds_list for s in range(a,b)]):
-#             seeds_range += '_complete'
-#         else:
-#             seeds_range += '_incomplete'
-#         self.tbl = self.results_bq + f'_{seeds_range}'
-#         self.pq = root_path / f'results/{results_stem}/{seeds_range}.parquet'
-# #         print(self.tbl, self.pq, self.bq_list)
+        a, b = min(self.seeds_list), max(self.seeds_list)
+        seeds_range = f'{str(a).rjust(4, "0")}_{str(b).rjust(4, "0")}'
+        if all([s in self.seeds_list for s in range(a,b)]):
+            seeds_range += '_complete'
+        else:
+            seeds_range += '_incomplete'
+        self.tbl = self.results_bq + f'_{seeds_range}'
+        self.pq = root_path / f'results/{results_stem}/{seeds_range}.parquet'
+#         print(self.tbl, self.pq, self.bq_list)
 
     def compute_results(self):
-        ds = f'{root_bq}.{self.results_stem}'
-        tbls = {'plans':list(), 'stats':list(), 'summaries':list()}
-        for src_tbl in bqclient.list_tables(ds):
-            key = src_tbl.table_id.split('_')[-1]
-            tbls[key].append(src_tbl.full_table_id)
-        
         u = "\nunion all\n"
-        
-        stack = {key: }
-        
-        
-        stack = {key: u.join([f'select * from tbl' for tbl in tbl_list]) for key, tbl_list in tbls.items()}
-        print(stack)
-        assert 1==2
-        
-        
-#         stack = {key: u.join([f'select * from tbl' for key, tbl_list in tbls.items()]) for key in ['plans', 'stats', 'summary']}
-
-        
-#         stack = {key: u.join([f'select * from {bq}{key}' for bq in self.bq_list]) for key in ['plans', 'stats', 'summary']}
+        stack = {key: u.join([f'select * from {bq}{key}' for bq in self.bq_list]) for key in ['plans', 'stats', 'summary']}
 
 #         cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
         
@@ -126,12 +110,6 @@ order by
 
 
     def plot(self, show=True):
-        try:
-            import pandas_bokeh
-        except:
-            os.system('pip install --upgrade pandas-bokeh')
-            import pandas_bokeh
-
         try:
             df = read_table(tbl=self.tbl+'_plans')
             df = df.pivot(index='geoid', columns='plan').astype(int)
