@@ -31,8 +31,8 @@ mcmc_opts = {
 
 run_opts = {
     'seed_start'      : 1000000,
-    'jobs_per_worker' : 1,
-    'workers'         : 2,
+    'jobs_per_worker' : 10000,
+    'workers'         : 80,
 }
 
 yes = (True, 't', 'true', 'y', 'yes')
@@ -136,9 +136,9 @@ b = a + run_opts['jobs_per_worker'] * run_opts['workers']
 seeds = [str(s).rjust(7,'0') for s in range(a, b)]
 print(f'I will run seeds {seeds}', flush=True)
 
-f(seeds[0])
-# with multiprocessing.Pool(run_opts['workers']) as pool:
-#     pool.map(multi_f, seeds)
+# f(seeds[0])
+with multiprocessing.Pool(run_opts['workers']) as pool:
+    pool.map(multi_f, seeds)
 
 
 
