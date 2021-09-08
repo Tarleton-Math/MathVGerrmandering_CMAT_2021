@@ -11,7 +11,8 @@ class MCMC(Base):
     pop_diff_exp          : int = 0
     pop_imbalance_target  : float = 1.0
     pop_imbalance_stop    : bool = True
-    report_period         : int = 50
+    report_period         : int = 500
+    save_period           : int = 500
     
 
     def __post_init__(self):
@@ -35,8 +36,6 @@ class MCMC(Base):
         self.num_districts = len(self.districts)
         self.pop_total = self.sum_nodes(self.graph, 'total_pop')
         self.pop_ideal = self.pop_total / self.num_districts
-        
-        
 
     def nodes_df(self, G=None):
         if G is None:
@@ -106,9 +105,8 @@ class MCMC(Base):
 #                 print('success')
                 if self.step % self.report_period == 0:
                     print(msg)
-                if self.step % 50 == 0:
+                if self.step % self.save_period == 0:
                     self.save_results(gcs=False)
-                    print('saving')
                 if self.pop_imbalance_stop:
                     if self.pop_imbalance < self.pop_imbalance_target:
 #                         rpt(f'pop_imbalance_target {self.pop_imbalance_target} satisfied - stopping')
@@ -138,7 +136,6 @@ class MCMC(Base):
             self.summaries = pd.concat(self.summaries, axis=0)
 
             for nm, tbl in tbls.items():
-#                 load_table(tbl=tbl, df=reorder(self[nm]), overwrite=self.overite_tbl)
                 saved = False
                 for i in range(1, 60):
                     try:
