@@ -114,7 +114,7 @@ class MCMC(Base):
             else:
                 rpt(msg)
                 break
-        self.save_results(gcs=True)
+        self.save_results()
 #         print('MCMC done')
 
 
