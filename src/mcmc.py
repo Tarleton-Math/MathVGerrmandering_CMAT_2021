@@ -19,7 +19,6 @@ class MCMC(Base):
         self.results_stem = self.gpickle.stem[6:]
         self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')
         ds = f'{root_bq}.{self.results_stem}'
-#         bqclient.create_dataset(ds, exists_ok=True)
         try:
             bqclient.create_dataset(ds)
         except:
@@ -120,7 +119,6 @@ class MCMC(Base):
                 break
         self.save_results()
 #         print('MCMC done')
-
 
 
     def save_results(self):
