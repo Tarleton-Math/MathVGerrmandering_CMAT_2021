@@ -20,16 +20,16 @@ graph_opts = {
 }
 
 mcmc_opts = {
-    'max_steps'             : 200,
+    'max_steps'             : 5000,
     'pop_diff_exp'          : 2,
     'pop_imbalance_target'  : 0.5,
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
-    'report_period'         : 50,
+    'report_period'         : 500,
 }
 
 run_opts = {
-    'seed_start'      : 9000,
+    'seed_start'      : 10000,
     'jobs_per_worker' : 1,
     'workers'         : 2,
 }
@@ -128,7 +128,7 @@ def f(seed):
 
 a = run_opts['seed_start']
 b = a + run_opts['jobs_per_worker'] * run_opts['workers']
-seeds = [str(s).rjust(4,'0') for s in range(a, b)]
+seeds = [str(s).rjust(7,'0') for s in range(a, b)]
 
 
 with multiprocessing.Pool(run_opts['workers']) as pool:

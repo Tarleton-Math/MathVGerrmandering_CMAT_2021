@@ -20,7 +20,7 @@ class MCMC(Base):
         ds = f'{root_bq}.{self.results_stem}'
         bqclient.create_dataset(ds, exists_ok=True)
         self.results_bq = ds + f'.{self.results_stem}_{self.seed}'
-        self.results_path = root_path / f'results/{self.results_stem}/{self.results_stem}_{self.seed}/'
+#         self.results_path = root_path / f'results/{self.results_stem}/{self.results_stem}_{self.seed}/'
         
         self.rng = np.random.default_rng(int(self.seed))
         self.graph = nx.read_gpickle(self.gpickle)
@@ -121,9 +121,7 @@ class MCMC(Base):
 
 
 
-    def save_results(self, gcs=False):
-        if self.results_bq is None:
-            return
+    def save_results(self):
         self.results_path.mkdir(parents=True, exist_ok=True)
         self.graph_file = self.results_path / f'graph.gpickle'
         nx.write_gpickle(self.graph, self.graph_file)
@@ -152,18 +150,6 @@ class MCMC(Base):
                         time.sleep(1)
                 assert saved, f'I tried to write the result of seed {self.seed} {i} times without success - giving up'
             self.overite_tbl = False
-        
-#         if gcs:
-#             for nm, tbl in tbls.items():
-#                 extract_job = bqclient.extract_table(
-#                     tbl,
-#                     destination_uri,
-#                     # Location must match that of the source table.
-#                     location="US",
-#                 )  # API request
-#                 extract_job.result()  # Waits for job to complete.
-
-#                 to_gcs(tbl)
 
 
     def recomb(self):
