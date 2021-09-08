@@ -19,9 +19,13 @@ class MCMC(Base):
         self.results_stem = self.gpickle.stem[6:]
         self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')
         ds = f'{root_bq}.{self.results_stem}'
-        bqclient.create_dataset(ds, exists_ok=True)
+#         bqclient.create_dataset(ds, exists_ok=True)
+        try:
+            bqclient.create_dataset(ds)
+        except:
+            pass
         self.results_bq = ds + f'.{self.results_stem}_{self.seed}'
-#         self.results_path = root_path / f'results/{self.results_stem}/{self.results_stem}_{self.seed}/'
+        self.results_path = root_path / f'results/{self.results_stem}/{self.results_stem}_{self.seed}/'
         
         self.rng = np.random.default_rng(int(self.seed))
         self.graph = nx.read_gpickle(self.gpickle)

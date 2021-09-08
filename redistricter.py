@@ -29,7 +29,7 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'      : 10000,
+    'seed_start'      : 1000000,
     'jobs_per_worker' : 1,
     'workers'         : 2,
 }
