@@ -12,12 +12,13 @@ except:
 from src import *
 start_time = time.time()
 
-graph_opts = {
-    'abbr'             : 'TX',
-    'level'            : 'cntyvtd',
-    'district_type'    : 'cd',
-    'census_yr'        : 2020,
-}
+# graph_opts = {
+#     'abbr'             : 'TX',
+#     'level'            : 'tabblock',
+#     'district_type'    : 'cd',
+#     'census_yr'        : 2020,
+#     'county_line'      : False,
+# }
 
 mcmc_opts = {
     'max_steps'             : 100000,
@@ -100,8 +101,8 @@ graph_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-#     'nodes',
-#     'graph',
+    'nodes',
+    'graph',
 )
 
 G = Graph(**graph_opts)
@@ -141,10 +142,10 @@ seeds = [str(s).rjust(7,'0') for s in range(a, b)]
 #     pool.map(multi_f, seeds)
 
 
-from src.analysis import *
-start = time.time()
-A = Analysis(nodes_tbl=G.nodes.tbl)
-A.compute_results()
-print(f'analysis took {time_formatter(time.time() - start)}')
+# from src.analysis import *
+# start = time.time()
+# A = Analysis(nodes_tbl=G.nodes.tbl)
+# A.compute_results()
+# print(f'analysis took {time_formatter(time.time() - start)}')
 
 print(f'total time elapsed = {time_formatter(time.time() - start_time)}')

@@ -30,7 +30,7 @@ data_bq  = root_bq  + '.redistricting_data'
 bqclient.create_dataset(data_bq , exists_ok=True)
 gcs_bucket = gcsclient.get_bucket(gcs_path)
 
-Levels = ['tabblock', 'bg', 'tract', 'cnty', 'state', 'cntyvtd']
+Levels = ['cntyvtd', 'tabblock', 'bg', 'tract', 'cnty', 'state']
 District_types = ['cd', 'sldu', 'sldl']
 Years = [2010, 2020]
 concat_str = ' ... '
@@ -210,10 +210,17 @@ class Variable(Base):
         print(f'success')
         
     def save_tbl(self):
-        df = read_table(tbl=self.tbl)
-        df.to_parquet(self.pq)
+        rpt(f'saving table')
+        rpt('reading')
+        self.df = read_table(tbl=self.tbl)
+        rpt('to parquet')
+        self.df.to_parquet(self.pq)
+        rpt('to csv')
+        self.csv = self.pq.with_suffix('.csv')
+        self.df.to_csv(self.csv)
+        rpt('to gcs')
         to_gcs(self.pq)
-        
+        to_gcs(self.csv)
         
     def get_zip(self):
         try:

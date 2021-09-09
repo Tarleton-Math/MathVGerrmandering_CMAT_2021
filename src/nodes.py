@@ -11,6 +11,7 @@ class Nodes(Variable):
 
     def get(self):
         self.tbl += f'_{self.g.district_type}'
+        self.pq = self.gpickle.with_suffix('.parquet')
         self.cols = {'assignments': Levels + District_types,
                      'shapes'     : ['aland', 'polygon'],
                      'census'     : Census_columns['data'],
@@ -23,6 +24,7 @@ class Nodes(Variable):
                 self.process_raw()
             rpt(f'creating table')
             self.process()
+            self.save_tbl()
         return self
 
 
@@ -100,7 +102,7 @@ from (
     from (
         select
             geoid_new as geoid,
-            max(county)   as county,
+            max(county) as county,
             max(district) as {self.g.district_type},
             {join_str(3).join(sels)},
             st_union_agg(polygon) as polygon,
@@ -129,4 +131,3 @@ from (
     )
 """
         load_table(self.tbl, query=query, preview_rows=0)
-        self.save_tbl()

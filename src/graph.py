@@ -15,7 +15,7 @@ class Graph(Variable):
     census_yr         : int = 2020
     level             : str = 'tract'
     district_type     : str = 'cd'
-    county_line       : bool = True
+    county_line       : bool = False
     node_attrs        : typing.Tuple = ('county', 'total_pop', 'density', 'aland', 'perim', 'polsby_popper')
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
