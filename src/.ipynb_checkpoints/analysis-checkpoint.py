@@ -3,7 +3,8 @@ from . import *
 @dataclasses.dataclass
 class Analysis(Base):
     nodes_tbl            : str
-    stack_size           : int = 10
+    max_results          : int = None
+    stack_size           : int = 100
     pop_imbalance_thresh : float = 10.0
         
     def __post_init__(self):
@@ -16,7 +17,7 @@ class Analysis(Base):
 
     def compute_results(self):
         self.tbls = dict()
-        for src_tbl in bqclient.list_tables(self.results_bq, max_results=1000):
+        for src_tbl in bqclient.list_tables(self.results_bq, max_results=self.max_results):
             full  = src_tbl.full_table_id.replace(':', '.')
             short = src_tbl.table_id
             seed = short.split('_')[-2]
@@ -27,34 +28,55 @@ class Analysis(Base):
                 except:
                     self.tbls[seed] = {key : full}
         
-#         cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
-        cols = [c for c in ['total_white', 'total_black', 'total_native', 'total_asian', 'total_pacific', 'total_other'] if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+        cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+#         cols = [c for c in ['total_white', 'total_black', 'total_native', 'total_asian', 'total_pacific', 'total_other'] + get_cols(self.nodes_tbl)[301:] if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+#         print(cols)
         
         def join(d):
             query = f"""
 select
-    cast(A.seed as int) as seed,
-    cast(A.plan as int) as plan,
-    cast(A.{self.district_type} as int) as {self.district_type},
+    A.seed,
+    A.plan,
+    A.{self.district_type},
     A.geoid,
-    C.hash as hash_plan,
-    C.pop_imbalance as pop_imbalance_plan,
-    C.polsby_popper as polsby_popper_plan,
-    B.polsby_popper as polsby_popper_district,
+    C.hash_plan,
+    C.pop_imbalance_plan,
+    C.polsby_popper_plan,
+    B.polsby_popper_district,
     B.aland,
     B.total_pop,
     B.total_pop / B.aland as density
-from
-    {d['plans']} as A
-inner join
-    {d['stats']} as B
+from (
+    select
+        cast(seed as int) as seed,
+        cast(plan as int) as plan,
+        cast({self.district_type} as int) as {self.district_type},
+        geoid
+    from
+        {d['plans']}
+    ) as A
+inner join (
+    select
+        cast(seed as int) as seed,
+        cast(plan as int) as plan,
+        cast({self.district_type} as int) as {self.district_type},
+        aland,
+        polsby_popper as polsby_popper_district,
+        total_pop
+    from
+        {d['stats']}
+    ) as B
 on
     A.seed = B.seed and A.plan = B.plan and A.{self.district_type} = B.{self.district_type}
 inner join (
     select
-        *
+        cast(seed as int) as seed,
+        cast(plan as int) as plan,
+        Z.hash as hash_plan,
+        pop_imbalance pop_imbalance_plan,
+        polsby_popper as polsby_popper_plan
     from
-        {d['summaries']}
+        {d['summaries']} as Z
     where
         pop_imbalance < {self.pop_imbalance_thresh}
     ) as C
@@ -109,7 +131,10 @@ group by
     seed, plan, {self.district_type}
 """
                 temp_tbls.append(self.tbl+f'_{k}')
+                print(temp_tbls)
                 load_table(tbl=temp_tbls[-1], query=query)
+                del stack_query
+                print(f'at step {k}')
         stack_query = u.join([f'select * from {tbl}' for tbl in temp_tbls])
         query = f"""
 select

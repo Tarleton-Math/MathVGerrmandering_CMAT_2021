@@ -28,55 +28,34 @@ class Analysis(Base):
                 except:
                     self.tbls[seed] = {key : full}
         
-        cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
-#         cols = [c for c in ['total_white', 'total_black', 'total_native', 'total_asian', 'total_pacific', 'total_other'] + get_cols(self.nodes_tbl)[301:] if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
-#         print(cols)
+#         cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+        cols = [c for c in ['total_white', 'total_black', 'total_native', 'total_asian', 'total_pacific', 'total_other'] if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
         
         def join(d):
             query = f"""
 select
-    A.seed,
-    A.plan,
-    A.{self.district_type},
+    cast(A.seed as int) as seed,
+    cast(A.plan as int) as plan,
+    cast(A.{self.district_type} as int) as {self.district_type},
     A.geoid,
-    C.hash_plan,
-    C.pop_imbalance_plan,
-    C.polsby_popper_plan,
-    B.polsby_popper_district,
+    C.hash as hash_plan,
+    C.pop_imbalance as pop_imbalance_plan,
+    C.polsby_popper as polsby_popper_plan,
+    B.polsby_popper as polsby_popper_district,
     B.aland,
     B.total_pop,
     B.total_pop / B.aland as density
-from (
-    select
-        cast(seed as int) as seed,
-        cast(plan as int) as plan,
-        cast({self.district_type} as int) as {self.district_type},
-        geoid
-    from
-        {d['plans']}
-    ) as A
-inner join (
-    select
-        cast(seed as int) as seed,
-        cast(plan as int) as plan,
-        cast({self.district_type} as int) as {self.district_type},
-        aland,
-        polsby_popper as polsby_popper_district,
-        total_pop
-    from
-        {d['stats']}
-    ) as B
+from
+    {d['plans']} as A
+inner join
+    {d['stats']} as B
 on
     A.seed = B.seed and A.plan = B.plan and A.{self.district_type} = B.{self.district_type}
 inner join (
     select
-        cast(seed as int) as seed,
-        cast(plan as int) as plan,
-        Z.hash as hash_plan,
-        pop_imbalance pop_imbalance_plan,
-        polsby_popper as polsby_popper_plan
+        *
     from
-        {d['summaries']} as Z
+        {d['summaries']}
     where
         pop_imbalance < {self.pop_imbalance_thresh}
     ) as C
@@ -131,10 +110,7 @@ group by
     seed, plan, {self.district_type}
 """
                 temp_tbls.append(self.tbl+f'_{k}')
-                print(temp_tbls)
                 load_table(tbl=temp_tbls[-1], query=query)
-                del stack_query
-                print(f'at step {k}')
         stack_query = u.join([f'select * from {tbl}' for tbl in temp_tbls])
         query = f"""
 select

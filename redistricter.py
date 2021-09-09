@@ -142,7 +142,9 @@ seeds = [str(s).rjust(7,'0') for s in range(a, b)]
 
 
 from src.analysis import *
+start = time.time()
 A = Analysis(nodes_tbl=G.nodes.tbl)
 A.compute_results()
-        
+print(f'analysis took {time_formatter(time.time() - start)}')
+
 print(f'total time elapsed = {time_formatter(time.time() - start_time)}')
