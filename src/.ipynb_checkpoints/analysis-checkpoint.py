@@ -12,7 +12,9 @@ class Analysis(Base):
         self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')
         self.results_bq = f'{root_bq}.{self.results_stem}'
         self.tbl = f'{self.results_bq}.{self.results_stem}_0000000_allresults'
-        self.pq = root_path / f'results/{self.results_stem}/{self.results_stem}_0000000_allresults.parquet'
+        file = root_path / f'results/{self.results_stem}/{self.results_stem}_0000000_allresults'
+        self.pq  = file + '.parquet'
+        self.csv = file + '.csv'
         delete_table(self.tbl)
 
     def compute_results(self):
@@ -28,7 +30,8 @@ class Analysis(Base):
                 except:
                     self.tbls[seed] = {key : full}
         
-        cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+        cols = [c for c in get_cols(self.nodes_tbl) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+
 #         cols = [c for c in ['total_white', 'total_black', 'total_native', 'total_asian', 'total_pacific', 'total_other'] + get_cols(self.nodes_tbl)[301:] if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
 #         print(cols)
         
@@ -157,6 +160,7 @@ order by
             delete_table(t)
         self.df = read_table(self.tbl)
         self.df.to_parquet(self.pq)
+        self.df.to_csv(self.csv)
         to_gcs(self.pq)
 
 
