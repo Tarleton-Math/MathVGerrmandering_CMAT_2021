@@ -20,13 +20,13 @@ graph_opts = {
 }
 
 mcmc_opts = {
-    'max_steps'             : 5000,
+    'max_steps'             : 100000,
     'pop_diff_exp'          : 2,
-    'pop_imbalance_target'  : 0.5,
+    'pop_imbalance_target'  : 0.001,
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
-    'report_period'         : 500,
-    'save_period'           : 500,
+    'report_period'         : 250,
+    'save_period'           : 1000,
 }
 
 run_opts = {
@@ -134,30 +134,15 @@ def multi_f(seed):
 a = run_opts['seed_start']
 b = a + run_opts['jobs_per_worker'] * run_opts['workers']
 seeds = [str(s).rjust(7,'0') for s in range(a, b)]
-print(f'I will run seeds {seeds}', flush=True)
+# print(f'I will run seeds {seeds}', flush=True)
 
 # f(seeds[0])
-with multiprocessing.Pool(run_opts['workers']) as pool:
-    pool.map(multi_f, seeds)
+# with multiprocessing.Pool(run_opts['workers']) as pool:
+#     pool.map(multi_f, seeds)
 
 
-
-# from src.analysis import *
-# results = mcmc_opts['results_bq']
-# # results = 'cmat-315920.results.TX_2020_cntyvtd_cd_2021_09_06_03_35_51'
-
-# A = Analysis(nodes=G.nodes.tbl, seeds=seeds)
-# A.compute_results()
-# for attempt in range(1, 6):
-#     rpt(f'analysis attempt {attempt}')
-#     try:
-#         A.compute_results()
-#         print(f'success!')
-#         break
-#     except:
-#         rpt(f'failed')
-#         new_tbl = nodes_tbl + '_copy'
-#         bqclient.copy_table(nodes_tbl, new_tbl).result()
-#         nodes_tbl = new_tbl
+from src.analysis import *
+A = Analysis(nodes_tbl=G.nodes.tbl)
+A.compute_results()
         
 print(f'total time elapsed = {time_formatter(time.time() - start_time)}')

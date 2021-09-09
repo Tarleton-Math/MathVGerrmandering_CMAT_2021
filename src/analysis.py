@@ -2,126 +2,136 @@ from . import *
 
 @dataclasses.dataclass
 class Analysis(Base):
-    nodes_tbl : str
+    nodes_tbl            : str
+    stack_size           : int = 10
+    pop_imbalance_thresh : float = 10.0
         
     def __post_init__(self):
         self.results_stem = self.nodes_tbl.split('.')[-1][6:]
         self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')
-#         bqclient.create_dataset(ds, exists_ok=True)
-#         self.results_bq = ds + f'.{results_stem}_{self.seed}'
-#         self.results_path = root_path / f'results/{results_stem}/{results_stem}_{self.seed}/'
-
-        
-        
-        
-#         self.seeds_list = list()
-#         self.bq_list = list()
-#         for seed in self.seeds:
-#             tbl = self.results_bq + f'_{seed}_'
-#             if check_table(tbl + 'plans'):
-#                 self.seeds_list.append(int(seed))
-#                 self.bq_list.append(tbl)
-
-#         a, b = min(self.seeds_list), max(self.seeds_list)
-#         seeds_range = f'{str(a).rjust(4, "0")}_{str(b).rjust(4, "0")}'
-#         if all([s in self.seeds_list for s in range(a,b)]):
-#             seeds_range += '_complete'
-#         else:
-#             seeds_range += '_incomplete'
-#         self.tbl = self.results_bq + f'_{seeds_range}'
-#         self.pq = root_path / f'results/{results_stem}/{seeds_range}.parquet'
-# #         print(self.tbl, self.pq, self.bq_list)
+        self.results_bq = f'{root_bq}.{self.results_stem}'
+        self.tbl = f'{self.results_bq}.{self.results_stem}_0000000_allresults'
+        self.pq = root_path / f'results/{self.results_stem}/{self.results_stem}_0000000_allresults.parquet'
+        delete_table(self.tbl)
 
     def compute_results(self):
-        ds = f'{root_bq}.{self.results_stem}'
-        tbls = {'plans':list(), 'stats':list(), 'summaries':list()}
-        for src_tbl in bqclient.list_tables(ds):
-            key = src_tbl.table_id.split('_')[-1]
-            tbls[key].append(src_tbl.full_table_id)
+        self.tbls = dict()
+        for src_tbl in bqclient.list_tables(self.results_bq, max_results=1000):
+            full  = src_tbl.full_table_id.replace(':', '.')
+            short = src_tbl.table_id
+            seed = short.split('_')[-2]
+            key  = short.split('_')[-1]
+            if seed.isnumeric():
+                try:
+                    self.tbls[seed][key] = full
+                except:
+                    self.tbls[seed] = {key : full}
         
-        u = "\nunion all\n"
-        
-        stack = {key: }
-        
-        
-        stack = {key: u.join([f'select * from tbl' for tbl in tbl_list]) for key, tbl_list in tbls.items()}
-        print(stack)
-        assert 1==2
-        
-        
-#         stack = {key: u.join([f'select * from tbl' for key, tbl_list in tbls.items()]) for key in ['plans', 'stats', 'summary']}
-
-        
-#         stack = {key: u.join([f'select * from {bq}{key}' for bq in self.bq_list]) for key in ['plans', 'stats', 'summary']}
-
 #         cols = [c for c in get_cols(self.nodes) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+        cols = [c for c in ['total_white', 'total_black', 'total_native', 'total_asian', 'total_pacific', 'total_other'] if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
         
-        cols = [c for c in ['total_white'] if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
-
-        
-        query = f"""
+        def join(d):
+            query = f"""
 select
-    B.seed,
-    B.plan,
-    C.{self.district_type},
-    max(B.hash) as hash_plan,
-    max(B.pop_imbalance) as pop_imbalance_plan,
-    max(B.polsby_popper) as polsby_popper_plan,
-    max(C.polsby_popper) as polsby_popper_district,
-    max(C.aland) as aland,
-    max(C.total_pop) as total_pop,
-    max(C.total_pop) / sum(E.aland) as density,
-    {join_str(1).join([f'sum(E.{c}) as {c}' for c in cols])}
+    cast(A.seed as int) as seed,
+    cast(A.plan as int) as plan,
+    cast(A.{self.district_type} as int) as {self.district_type},
+    A.geoid,
+    C.hash as hash_plan,
+    C.pop_imbalance as pop_imbalance_plan,
+    C.polsby_popper as polsby_popper_plan,
+    B.polsby_popper as polsby_popper_district,
+    B.aland,
+    B.total_pop,
+    B.total_pop / B.aland as density
+from
+    {d['plans']} as A
+inner join
+    {d['stats']} as B
+on
+    A.seed = B.seed and A.plan = B.plan and A.{self.district_type} = B.{self.district_type}
+inner join (
+    select
+        *
+    from
+        {d['summaries']}
+    where
+        pop_imbalance < {self.pop_imbalance_thresh}
+    ) as C
+on
+    A.seed = C.seed and A.plan = C.plan
+"""
+            return query
+        
+        temp_tbls = list()
+        u = '\nunion all\n'
+        k = len(self.tbls)
+        for seed, tbls in self.tbls.items():
+            k -= 1
+            if len(tbls) == 3:
+                try:
+                    stack_query = stack_query + u + join(tbls)
+                except:
+                    stack_query = join(tbls)
+                
+            if k % self.stack_size == 0:
+                query = f"""
+select
+    A.seed,
+    A.plan,
+    A.{self.district_type},
+    max(A.hash_plan) as hash_plan,
+    max(A.pop_imbalance_plan) as pop_imbalance_plan,
+    max(A.polsby_popper_plan) as polsby_popper_plan,
+    max(A.polsby_popper_district) as polsby_popper_district,
+    max(A.aland) as aland,
+    max(A.total_pop) as total_pop,
+    max(A.density) as density,
+    {join_str(1).join([f'sum(B.{c}) as {c}' for c in cols])}
 from (
     select
         *
     from (
         select
             *,
-            row_number() over (partition by A.hash order by plan asc, seed asc) as r
+            row_number() over (partition by hash_plan order by plan asc, seed asc) as r
         from (
-            {subquery(stack['summary'], indents=3)}
-            ) as A
+            {subquery(stack_query, indents=3)}
+            )
         )
     where r = 1
-    ) as B
-inner join (
-    {subquery(stack['stats'], indents=1)}
-    ) as C
-on
-    B.seed = C.seed and B.plan = C.plan
-inner join (
-    select
-        *
-    from (
-        {subquery(stack['plans'], indents=2)}
-        )
-    ) as D
-on
-    C.seed = D.seed and C.plan = D.plan and C.{self.district_type} = D.{self.district_type}
+    ) as A
 inner join
-    {self.nodes} as E
+    {self.nodes_tbl} as B
 on
-    D.geoid = E.geoid
+    A.geoid = B.geoid
 group by
     seed, plan, {self.district_type}
+"""
+                temp_tbls.append(self.tbl+f'_{k}')
+                load_table(tbl=temp_tbls[-1], query=query)
+        stack_query = u.join([f'select * from {tbl}' for tbl in temp_tbls])
+        query = f"""
+select
+    *
+from (
+    select
+        *,
+        row_number() over (partition by hash_plan order by plan asc, seed asc) as r
+    from (
+        {subquery(stack_query, indents=3)}
+        )
+    )
+where
+    r = 1
 order by
     seed, plan, {self.district_type}
 """
         load_table(tbl=self.tbl, query=query)
-        self.fetch_results()
-        self.save_results()
-        
-    def fetch_results(self):
-        self.results = read_table(tbl=self.tbl)
-        idx = ['seed', 'plan', 'cd']
-        for col in idx:
-            self.results[col] = rjust(self.results[col])
-        self.results.sort_values(idx, inplace=True)
-        return self.results
-        
-    def save_results(self):
-        self.results.to_parquet(self.pq)
+        for t in temp_tbls:
+            delete_table(t)
+        self.df = read_table(self.tbl)
+        self.df.to_parquet(self.pq)
         to_gcs(self.pq)
 
 

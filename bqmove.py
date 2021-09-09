@@ -1,5 +1,5 @@
 from src import *
-for src_tbl in bqclient.list_tables(f'{proj_id}.results'):
+for src_tbl in reversed(list(bqclient.list_tables(f'{proj_id}.results'))):
     w = src_tbl.table_id.split('_')
     results_stem = f'{proj_id}.{"_".join(w[:4])}'
     dest = f'{results_stem}.{src_tbl.table_id}'

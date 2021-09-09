@@ -26,7 +26,8 @@ class MCMC(Base):
         self.results_bq = ds + f'.{self.results_stem}_{self.seed}'
         self.results_path = root_path / f'results/{self.results_stem}/{self.results_stem}_{self.seed}/'
         
-        self.rng = np.random.default_rng(int(self.seed))
+        self.seed = int(self.seed)
+        self.rng = np.random.default_rng(self.seed)
         self.graph = nx.read_gpickle(self.gpickle)
         nx.set_node_attributes(self.graph, self.seed, 'seed')
         
@@ -73,8 +74,8 @@ class MCMC(Base):
             for k, v in s.items():
                 self.stat.loc[d, k] = v
         self.stat['total_pop'] = self.stat['total_pop'].astype(int)
-        self.stat['plan'] = self.step
-        self.stat['seed'] = self.seed
+        self.stat['plan'] = int(self.step)
+        self.stat['seed'] = int(self.seed)
         
         
         self.pop_imbalance = (self.stat['total_pop'].max() - self.stat['total_pop'].min()) / self.pop_ideal * 100
