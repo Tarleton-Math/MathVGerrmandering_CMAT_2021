@@ -128,23 +128,23 @@ def multi_f(seed):
     time.sleep(idx / 100)
     return f(seed)
 
-if run_opts['workers'] <= 1:
-    M = f(seeds[0])
-else:
-    b = run_opts['seed_start']
-    for k in range(run_opts['jobs_per_worker']):
-        a = b
-        b = a + run_opts['workers']
-        seeds = list(range(a, b))
-        # print(f'I will run seeds {seeds}', flush=True)
-        with multiprocessing.Pool(run_opts['workers']) as pool:
-            M = pool.map(multi_f, seeds)
+# if run_opts['workers'] <= 1:
+#     M = f(seeds[0])
+# else:
+#     b = run_opts['seed_start']
+#     for k in range(run_opts['jobs_per_worker']):
+#         a = b
+#         b = a + run_opts['workers']
+#         seeds = list(range(a, b))
+#         # print(f'I will run seeds {seeds}', flush=True)
+#         with multiprocessing.Pool(run_opts['workers']) as pool:
+#             M = pool.map(multi_f, seeds)
 
 
-# from src.analysis import *
-# start = time.time()
-# A = Analysis(nodes_tbl=G.nodes.tbl)
-# A.compute_results()
-# print(f'analysis took {time_formatter(time.time() - start)}')
+from src.analysis import *
+start = time.time()
+A = Analysis(nodes_tbl=G.nodes.tbl, max_results=20)
+A.compute_results()
+print(f'analysis took {time_formatter(time.time() - start)}')
 
 print(f'total time elapsed = {time_formatter(time.time() - start_time)}')

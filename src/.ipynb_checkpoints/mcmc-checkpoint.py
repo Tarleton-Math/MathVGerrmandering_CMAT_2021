@@ -49,7 +49,6 @@ class MCMC(Base):
         self.nodes_df['target'] = self.nodes_df.groupby('county')['total_pop'].transform('sum') / self.pop_ideal
         self.nodes_df['whole_districts_target'] = np.floor(self.nodes_df['target']).astype(int)
         self.nodes_df['county_parts_target'] = np.ceil(self.nodes_df['target']).astype(int)
-        self.splits_raw = self.nodes_df[['seed', 'plan', 'county', self.district_type, 'county_parts_target', 'whole_districts_target']].drop_duplicates()
         self.get_splits()
         self.whole_districts_imbalance_init = self.whole_districts_imbalance
         self.county_parts_imbalance_init = self.county_parts_imbalance
@@ -98,11 +97,11 @@ class MCMC(Base):
         self.summaries['pop_imbalance'] = [self.pop_imbalance]
         self.summaries['county_parts_imbalance'] = [self.county_parts_imbalance]
         self.summaries['whole_districts_imbalance'] = [self.whole_districts_imbalance]
+        self.summaries['defect'] = [self.defect]
         return self.summaries
 
     def get_splits(self):
-#         self.splits = self.nodes_df[['seed', 'plan', 'county', self.district_type, 'county_parts_target', 'whole_districts_target']].drop_duplicates()
-        self.splits = self.splits_raw.copy()
+        self.splits = self.nodes_df[['seed', 'plan', 'county', self.district_type, 'county_parts_target', 'whole_districts_target']].drop_duplicates()
         self.splits['plan'] = self.plan
         self.splits['county_parts'] = self.splits.groupby('county')[self.district_type].transform('count')
         self.splits['whole_district'] = self.splits.groupby(self.district_type)['county'].transform('count') <= 1

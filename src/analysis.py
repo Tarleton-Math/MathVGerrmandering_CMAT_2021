@@ -13,8 +13,8 @@ class Analysis(Base):
         self.results_bq = f'{root_bq}.{self.results_stem}'
         self.tbl = f'{self.results_bq}.{self.results_stem}_0000000_allresults'
         file = root_path / f'results/{self.results_stem}/{self.results_stem}_0000000_allresults'
-        self.pq  = file + '.parquet'
-        self.csv = file + '.csv'
+        self.pq  = file.with_suffix('.parquet')
+        self.csv = file.with_suffix('.csv')
         delete_table(self.tbl)
 
     def compute_results(self):
@@ -77,8 +77,8 @@ inner join (
         cast(plan as int) as plan,
         Z.hash as hash_plan,
         pop_imbalance as pop_imbalance_plan,
-        county_parts_imbalance as county_parts_imbalance_plan,
-        whole_districts_imbalance as whole_districts_imbalance_plan,
+        --county_parts_imbalance as county_parts_imbalance_plan,
+        --whole_districts_imbalance as whole_districts_imbalance_plan,
         polsby_popper as polsby_popper_plan
     from
         {d['summaries']} as Z
@@ -147,7 +147,7 @@ select
 from (
     select
         *,
-        row_number() over (partition by hash_plan order by plan asc, seed asc) as r
+        row_number() over (partition by hash_plan, {self.district_type} order by plan asc, seed asc) as r
     from (
         {subquery(stack_query, indents=3)}
         )
