@@ -53,6 +53,7 @@ class MCMC(Base):
         self.get_splits()
         self.whole_districts_imbalance_init = self.whole_districts_imbalance
         self.county_parts_imbalance_init = self.county_parts_imbalance
+        self.defect_init = self.county_parts_imbalance_init + self.whole_districts_imbalance_init
         self.report()
         
     def edges_tuple(self, G=None):
@@ -110,6 +111,7 @@ class MCMC(Base):
         
         self.county_parts_imbalance = (self.splits['county_parts_target'] - self.splits['county_parts']).abs().sum()
         self.whole_districts_imbalance = (self.splits['whole_districts_target'] - self.splits['whole_districts']).abs().sum()
+        self.defect = self.county_parts_imbalance + self.whole_districts_imbalance
         return self.splits
 
     def report(self):
@@ -266,7 +268,8 @@ class MCMC(Base):
 #                             whole_districts_imbalance_old = self.whole_districts_imbalance
                             self.get_splits()
 #                             I = (county_parts_imbalance_old - self.county_parts_imbalance) + (whole_districts_imbalance_old - self.whole_districts_imbalance)
-                            I = (self.whole_districts_imbalance_init - self.whole_districts_imbalance) +    (self.county_parts_imbalance_init - self.county_parts_imbalance)
+#                             I = (self.whole_districts_imbalance_init - self.whole_districts_imbalance) +    (self.county_parts_imbalance_init - self.county_parts_imbalance)
+                            I = self.defect_init - self.defect
                             if I < 0:
                                 T.add_edge(*e)
                                 self.nodes_df[self.district_type] = self.nodes_df['old']
