@@ -21,19 +21,19 @@ start_time = time.time()
 # }
 
 mcmc_opts = {
-    'max_steps'             : 100000,
+    'max_steps'             : 6,#100000,
     'pop_diff_exp'          : 2,
     'pop_imbalance_target'  : 0.001,
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
     'report_period'         : 250,
-    'save_period'           : 1000,
+    'save_period'           : 3,
 }
 
 run_opts = {
-    'seed_start'      : 1000000,
-    'jobs_per_worker' : 10000,
-    'workers'         : 80,
+    'seed_start'      : 2000000,
+    'jobs_per_worker' : 1,
+    'workers'         : 4,
 }
 
 yes = (True, 't', 'true', 'y', 'yes')
@@ -119,25 +119,22 @@ else:
     print(f'hashseed != {HASHSEED} so results are NOT reproducible and will NOT be saved to BigQuery')
 
 def f(seed):    
-    print(f'starting seed {seed}', flush=True)
-    start = time.time()
     M = MCMC(seed=seed, gpickle=G.gpickle, save=save, **mcmc_opts)
     M.run_chain()
-    print(f'finished seed {seed} with pop_imbalance={M.pop_imbalance:.1f} after {M.step} steps and {time_formatter(time.time() - start)}')
-
+    return M
     
 def multi_f(seed):
     idx = multiprocessing.current_process()._identity[0]
     time.sleep(idx / 100)
-    f(seed)
+    return f(seed)
 
 
 a = run_opts['seed_start']
 b = a + run_opts['jobs_per_worker'] * run_opts['workers']
-seeds = [str(s).rjust(7,'0') for s in range(a, b)]
+seeds = list(range(a, b))
 # print(f'I will run seeds {seeds}', flush=True)
 
-f(seeds[0])
+M = f(seeds[0])
 # with multiprocessing.Pool(run_opts['workers']) as pool:
 #     pool.map(multi_f, seeds)
 

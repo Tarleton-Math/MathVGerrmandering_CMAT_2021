@@ -56,6 +56,7 @@ class Graph(Variable):
         self.elections     = Elections(g=self)
         self.nodes         = Nodes(g=self)
 
+        self.tbl += f'_{self.g.district_type}'
         exists = super().get()
         try:
             self.graph

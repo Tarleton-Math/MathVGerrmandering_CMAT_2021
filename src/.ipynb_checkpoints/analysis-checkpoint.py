@@ -76,7 +76,9 @@ inner join (
         cast(seed as int) as seed,
         cast(plan as int) as plan,
         Z.hash as hash_plan,
-        pop_imbalance pop_imbalance_plan,
+        pop_imbalance as pop_imbalance_plan,
+        county_parts_imbalance as county_parts_imbalance_plan,
+        whole_districts_imbalance as whole_districts_imbalance_plan,
         polsby_popper as polsby_popper_plan
     from
         {d['summaries']} as Z
@@ -162,6 +164,7 @@ order by
         self.df.to_parquet(self.pq)
         self.df.to_csv(self.csv)
         to_gcs(self.pq)
+        to_gcs(self.csv)
 
 
     def plot(self, show=True):
