@@ -14,8 +14,8 @@ start_time = time.time()
 
 # graph_opts = {
 #     'abbr'             : 'TX',
-#     'level'            : 'tabblock',
-#     'district_type'    : 'cd',
+#     'level'            : 'cntyvtd',
+#     'district_type'    : 'sldl',
 #     'census_yr'        : 2020,
 #     'county_line'      : False,
 # }
@@ -101,8 +101,8 @@ graph_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-    'nodes',
-    'graph',
+#     'nodes',
+#     'graph',
 )
 
 G = Graph(**graph_opts)
@@ -137,7 +137,7 @@ b = a + run_opts['jobs_per_worker'] * run_opts['workers']
 seeds = [str(s).rjust(7,'0') for s in range(a, b)]
 # print(f'I will run seeds {seeds}', flush=True)
 
-# f(seeds[0])
+f(seeds[0])
 # with multiprocessing.Pool(run_opts['workers']) as pool:
 #     pool.map(multi_f, seeds)
 

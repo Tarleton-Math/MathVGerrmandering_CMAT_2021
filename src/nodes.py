@@ -103,7 +103,8 @@ from (
         select
             geoid_new as geoid,
             max(county) as county,
-            max(district) as {self.g.district_type},
+            --max(district) as {self.g.district_type},
+            cast(max(district) as int) as {self.g.district_type},
             {join_str(3).join(sels)},
             st_union_agg(polygon) as polygon,
             sum(aland) / {meters_per_mile**2} as aland

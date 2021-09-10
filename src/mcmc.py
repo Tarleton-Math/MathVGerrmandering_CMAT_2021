@@ -40,11 +40,15 @@ class MCMC(Base):
         self.num_districts = len(self.districts)
         self.pop_total = self.sum_nodes(self.graph, 'total_pop')
         self.pop_ideal = self.pop_total / self.num_districts
+        self.nodes_df = pd.DataFrame.from_dict(dict(self.graph.nodes(data=True)), orient='index')
+        self.nodes_df['target'] = self.nodes_df.groupby('county')['total_pop'].transform('sum') / self.ideal_pop
+        self.nodes_df['districts_contained_target'] = np.floor(self.nodes_df['target']).astype(int)
+        self.nodes_df['parts_target'] = np.ceil(self.nodes_df['target']).astype(int)
 
-    def nodes_df(self, G=None):
-        if G is None:
-            G = self.graph
-        return pd.DataFrame.from_dict(G.nodes, orient='index')
+#     def nodes_df(self, G=None):
+#         if G is None:
+#             G = self.graph
+#         return pd.DataFrame.from_dict(G.nodes, orient='index')
         
     def edges_tuple(self, G=None):
         if G is None:
@@ -52,7 +56,7 @@ class MCMC(Base):
         return tuple(sorted(tuple((min(u,v), max(u,v)) for u, v in G.edges)))
     
     def get_districts(self):
-        grp = self.nodes_df().groupby(self.district_type)
+        grp = self.nodes_df.groupby(self.district_type)
         self.districts = {k:tuple(sorted(v)) for k,v in grp.groups.items()}
         self.partition = tuple(sorted(self.districts.values()))
         self.hash = self.partition.__hash__()
@@ -76,15 +80,27 @@ class MCMC(Base):
         self.stat['total_pop'] = self.stat['total_pop'].astype(int)
         self.stat['plan'] = int(self.step)
         self.stat['seed'] = int(self.seed)
-        
-        
         self.pop_imbalance = (self.stat['total_pop'].max() - self.stat['total_pop'].min()) / self.pop_ideal * 100
+        return self.stat
+        
+    def get_summary(self):
         self.summary = pd.DataFrame()
         self.summary['seed'] = [self.seed]
         self.summary['plan'] = [self.step]
         self.summary['hash'] = [self.hash]
         self.summary['pop_imbalance'] = [self.pop_imbalance]
         self.summary['polsby_popper']  = [self.stat['polsby_popper'].mean()]
+        return self.summary
+
+    def get_splits(self):
+        df = self.nodes_df[['county', self.district_type, 'parts_target', 'districts_contained_target']].drop_duplicates()
+        df['whole_district'] = df.groupby(self.district_type)['county'].transform('count') <= 1
+        df['districts_contained'] = df.groupby('county')['whole_district'].transform('sum')
+        df['parts'] = df.groupby('county')[self.district_type].transform('count')
+        df['parts_imbalance'] = (df['parts_target'] - df['parts']).abs()
+        df['districts_contained_imbalance'] = (df['districts_contained_target'] - df['districts_contained']).abs()
+        self.parts_imbalance = df['parts_imbalance'].sum()
+        self.districts_contained_imbalance = df['districts_contained_imbalance'].sum()
 
 
     def run_chain(self):
@@ -92,9 +108,9 @@ class MCMC(Base):
         self.overite_tbl = True
         nx.set_node_attributes(self.graph, self.step, 'plan')
         self.get_stats()
-        self.plans      = [self.nodes_df()[['seed', 'plan', self.district_type]]]
-        self.stats      = [self.stat.copy()]
-        self.summaries  = [self.summary.copy()]
+        self.plans      = [self.nodes_df[['seed', 'plan', self.district_type]]]
+        self.stats      = [self.get_stats()]
+        self.summaries  = [self.get_summary()]
         self.hashes     = [self.hash]
         for k in range(1, self.max_steps+1):
             self.step = k
@@ -102,9 +118,9 @@ class MCMC(Base):
             msg = f"seed {self.seed} step {self.step} pop_imbalance={self.pop_imbalance:.1f}"
 
             if self.recomb():
-                self.plans.append(self.nodes_df()[['seed', 'plan', self.district_type]])
-                self.stats.append(self.stat.copy())
-                self.summaries.append(self.summary.copy())
+                self.plans.append(self.nodes_df[['seed', 'plan', self.district_type]])
+                self.stats.append(self.get_stats())
+                self.summaries.append(self.get_summary())
                 self.hashes.append(self.hash)
 #                 print('success')
                 if self.step % self.report_period == 0:
@@ -123,10 +139,11 @@ class MCMC(Base):
 
 
     def save_results(self):
-        self.results_path.mkdir(parents=True, exist_ok=True)
-        self.graph_file = self.results_path / f'graph.gpickle'
-        nx.write_gpickle(self.graph, self.graph_file)
-        to_gcs(self.graph_file)
+        return
+#         self.results_path.mkdir(parents=True, exist_ok=True)
+#         self.graph_file = self.results_path / f'graph.gpickle'
+#         nx.write_gpickle(self.graph, self.graph_file)
+#         to_gcs(self.graph_file)
         
         def reorder(df):
             idx = [c for c in ['seed', 'plan'] if c in df.columns]
@@ -209,8 +226,8 @@ class MCMC(Base):
                         t = q - s  # pop of component 0 (recall q is the combined pop of d0&d1)
                         if s > t:  # ensure s < t
                             s, t = t, s
-                        imb = (max(t, P_max) - min(s, P_min)) / self.pop_ideal * 100  # compute new pop imbalance
-                        I = self.pop_imbalance - imb
+                        imb_new = (max(t, P_max) - min(s, P_min)) / self.pop_ideal * 100  # compute new pop imbalance
+                        I = self.pop_imbalance - imb_new
                         if I < 0:
                             if self.anneal < 1e-7:
                                 if I < -0.01:
@@ -219,6 +236,20 @@ class MCMC(Base):
                             elif self.rng.uniform() > np.exp(I / self.anneal):
                                 T.add_edge(*e)  #  if pop_balance not achieved, re-insert e
                                 continue
+                                
+                        self.nodes_df['old'] = self.nodes_df[self.district_type].copy()
+                        self.nodes_df.loc[comp[0], self.district_type] = d0
+                        self.nodes_df.loc[comp[1], self.district_type] = d1
+                        parts_old = self.parts_imbalance
+                        wd_old = self.whole_districts_imbalance
+                        self.get_splits()
+                        if (parts_old - self.parts_imbalance) + (wd_old - self.whole_districts_imbalance) < 0:
+                            T.add_edge(*e)
+                            self.nodes_df[self.district_type] = self.nodes_df['old']
+                            continue
+                            
+                            
+
                         # We found a good cut edge & made 2 new districts.  They will be label with the values of d0 & d1.
                         # But which one should get d0?  This is surprisingly important so colors "look right" in animations.
                         # Else, colors can get quite "jumpy" and give an impression of chaos and instability
@@ -238,6 +269,7 @@ class MCMC(Base):
                             self.graph.nodes[n][self.district_type] = d0
                         for n in comp[1]:
                             self.graph.nodes[n][self.district_type] = d1
+                            
                             
                         # update stats
                         self.get_stats()

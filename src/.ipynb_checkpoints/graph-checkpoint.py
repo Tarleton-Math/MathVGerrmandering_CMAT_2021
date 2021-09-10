@@ -67,7 +67,7 @@ class Graph(Variable):
             except:
                 rpt(f'creating graph')
                 self.process()
-#                 self.gpickle.parent.mkdir(parents=True, exist_ok=True)
+                self.gpickle.parent.mkdir(parents=True, exist_ok=True)
                 nx.write_gpickle(self.graph, self.gpickle)
                 to_gcs(self.gpickle)
         return self
