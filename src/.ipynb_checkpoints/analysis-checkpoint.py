@@ -18,6 +18,7 @@ class Analysis(Base):
         delete_table(self.tbl)
 
     def compute_results(self):
+        u = '\nunion all\n'
         self.tbls = dict()
         for src_tbl in bqclient.list_tables(self.results_bq, max_results=self.max_results):
             full  = src_tbl.full_table_id.replace(':', '.')
@@ -29,11 +30,30 @@ class Analysis(Base):
                     self.tbls[seed][key] = full
                 except:
                     self.tbls[seed] = {key : full}
-        
+                    
+        self.tbls = {seed : tbls for seed, tbls in self.tbls.items() if len(tbls)>=3}
         cols = [c for c in get_cols(self.nodes_tbl) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
 
 #         cols = [c for c in ['total_white', 'total_black', 'total_native', 'total_asian', 'total_pacific', 'total_other'] + get_cols(self.nodes_tbl)[301:] if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+        
+#         cols = [c for c in ['total_white'] if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+
 #         print(cols)
+        hash_query = u.join([f'select seed, A.hash as hash_plan from {tbls["summaries"]} as A' for seed, tbls in self.tbls.items()])
+        hash_query = f"""
+select
+    min(cast(seed as int)) as seed,
+    hash_plan
+from (
+    {subquery(hash_query, indents=1)}
+    )
+group by
+    hash_plan
+"""
+#         print(hash_query)
+        print('running hash query')
+        self.hash_tbl = f'{self.tbl}_hash'
+        load_table(tbl=self.hash_tbl, query=hash_query)
         
         def join(d):
             query = f"""
@@ -73,17 +93,25 @@ on
     A.seed = B.seed and A.plan = B.plan and A.{self.district_type} = B.{self.district_type}
 inner join (
     select
-        cast(seed as int) as seed,
-        cast(plan as int) as plan,
-        Z.hash as hash_plan,
-        pop_imbalance as pop_imbalance_plan,
-        --county_parts_imbalance as county_parts_imbalance_plan,
-        --whole_districts_imbalance as whole_districts_imbalance_plan,
-        polsby_popper as polsby_popper_plan
-    from
-        {d['summaries']} as Z
-    where
-        pop_imbalance < {self.pop_imbalance_thresh}
+        Y.*
+    from (
+        select
+            cast(seed as int) as seed,
+            cast(plan as int) as plan,
+            Z.hash as hash_plan,
+            pop_imbalance as pop_imbalance_plan,
+            --county_parts_imbalance as county_parts_imbalance_plan,
+            --whole_districts_imbalance as whole_districts_imbalance_plan,
+            polsby_popper as polsby_popper_plan
+        from
+            {d['summaries']} as Z
+        where
+            pop_imbalance < {self.pop_imbalance_thresh}
+        ) as Y
+    inner join
+        {self.hash_tbl} as X
+    on
+        X.seed = Y.seed and X.hash_plan = Y.hash_plan
     ) as C
 on
     A.seed = C.seed and A.plan = C.plan
@@ -91,17 +119,16 @@ on
             return query
         
         temp_tbls = list()
-        u = '\nunion all\n'
         k = len(self.tbls)
         for seed, tbls in self.tbls.items():
             k -= 1
-            if len(tbls) == 3:
-                try:
-                    stack_query = stack_query + u + join(tbls)
-                except:
-                    stack_query = join(tbls)
+            try:
+                stack_query = stack_query + u + join(tbls)
+            except:
+                stack_query = join(tbls)
                 
             if k % self.stack_size == 0:
+                print(f'running step {k}')
                 query = f"""
 select
     A.seed,
@@ -116,17 +143,7 @@ select
     max(A.density) as density,
     {join_str(1).join([f'sum(B.{c}) as {c}' for c in cols])}
 from (
-    select
-        *
-    from (
-        select
-            *,
-            row_number() over (partition by hash_plan order by plan asc, seed asc) as r
-        from (
-            {subquery(stack_query, indents=3)}
-            )
-        )
-    where r = 1
+    {subquery(stack_query, indents=1)}
     ) as A
 inner join
     {self.nodes_tbl} as B
@@ -136,35 +153,20 @@ group by
     seed, plan, {self.district_type}
 """
                 temp_tbls.append(self.tbl+f'_{k}')
-                print(temp_tbls)
                 load_table(tbl=temp_tbls[-1], query=query)
                 del stack_query
-                print(f'at step {k}')
-        stack_query = u.join([f'select * from {tbl}' for tbl in temp_tbls])
-        query = f"""
-select
-    *
-from (
-    select
-        *,
-        row_number() over (partition by hash_plan, {self.district_type} order by plan asc, seed asc) as r
-    from (
-        {subquery(stack_query, indents=3)}
-        )
-    )
-where
-    r = 1
-order by
-    seed, plan, {self.district_type}
-"""
+
+        print('stacking')
+        query = u.join([f'select * from {tbl}' for tbl in temp_tbls])
         load_table(tbl=self.tbl, query=query)
+        delete_table(self.hash_tbl)
         for t in temp_tbls:
             delete_table(t)
-        self.df = read_table(self.tbl)
-        self.df.to_parquet(self.pq)
-        self.df.to_csv(self.csv)
-        to_gcs(self.pq)
-        to_gcs(self.csv)
+#         self.df = read_table(self.tbl)
+#         self.df.to_parquet(self.pq)
+#         self.df.to_csv(self.csv)
+#         to_gcs(self.pq)
+#         to_gcs(self.csv)
 
 
     def plot(self, show=True):

@@ -31,7 +31,7 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'      : 3000000,
+    'seed_start'      : 3001000,
     'jobs_per_worker' : 5,
     'workers'         : 80,
 }
@@ -143,7 +143,7 @@ def multi_f(seed):
 
 from src.analysis import *
 start = time.time()
-A = Analysis(nodes_tbl=G.nodes.tbl, max_results=20)
+A = Analysis(nodes_tbl=G.nodes.tbl, stack_size=2, max_results=30)
 A.compute_results()
 print(f'analysis took {time_formatter(time.time() - start)}')
 
