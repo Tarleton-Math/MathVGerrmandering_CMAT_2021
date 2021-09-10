@@ -49,12 +49,11 @@ class MCMC(Base):
         self.nodes_df['target'] = self.nodes_df.groupby('county')['total_pop'].transform('sum') / self.pop_ideal
         self.nodes_df['whole_districts_target'] = np.floor(self.nodes_df['target']).astype(int)
         self.nodes_df['county_parts_target'] = np.ceil(self.nodes_df['target']).astype(int)
+        self.splits_raw = self.nodes_df[['seed', 'plan', 'county', self.district_type, 'county_parts_target', 'whole_districts_target']].drop_duplicates()
+        self.get_splits()
+        self.whole_districts_imbalance_init = self.whole_districts_imbalance
+        self.county_parts_imbalance_init = self.county_parts_imbalance
         self.report()
-
-#     def nodes_df(self, G=None):
-#         if G is None:
-#             G = self.graph
-#         return pd.DataFrame.from_dict(G.nodes, orient='index')
         
     def edges_tuple(self, G=None):
         if G is None:
@@ -72,7 +71,7 @@ class MCMC(Base):
     
     def get_stats(self):
         self.get_districts()
-        self.stat = pd.DataFrame()
+        self.stats = pd.DataFrame()
         for d, N in self.districts.items():
             H = self.graph.subgraph(N)
             s = dict()
@@ -82,30 +81,33 @@ class MCMC(Base):
             s['polsby_popper'] = 4 * np.pi * s['aland'] / (external_perim**2) * 100
             s['total_pop'] = self.sum_nodes(H, 'total_pop')
             for k, v in s.items():
-                self.stat.loc[d, k] = v
-        self.stat['total_pop'] = self.stat['total_pop'].astype(int)
-        self.stat['plan'] = int(self.plan)
-        self.stat['seed'] = int(self.seed)
-        self.pop_imbalance = (self.stat['total_pop'].max() - self.stat['total_pop'].min()) / self.pop_ideal * 100
-        return self.stat
+                self.stats.loc[d, k] = v
+        self.stats['total_pop'] = self.stats['total_pop'].astype(int)
+        self.stats['plan'] = int(self.plan)
+        self.stats['seed'] = int(self.seed)
+        self.pop_imbalance = (self.stats['total_pop'].max() - self.stats['total_pop'].min()) / self.pop_ideal * 100
+        return self.stats
         
-    def get_summary(self):
-        self.summary = pd.DataFrame()
-        self.summary['seed'] = [self.seed]
-        self.summary['plan'] = [self.plan]
-        self.summary['hash'] = [self.hash]
-        self.summary['polsby_popper']  = [self.stat['polsby_popper'].mean()]
-        self.summary['pop_imbalance'] = [self.pop_imbalance]
-        self.summary['county_parts_imbalance'] = [self.county_parts_imbalance]
-        self.summary['whole_districts_imbalance'] = [self.whole_districts_imbalance]
-        return self.summary
+    def get_summaries(self):
+        self.summaries = pd.DataFrame()
+        self.summaries['seed'] = [self.seed]
+        self.summaries['plan'] = [self.plan]
+        self.summaries['hash'] = [self.hash]
+        self.summaries['polsby_popper']  = [self.stats['polsby_popper'].mean()]
+        self.summaries['pop_imbalance'] = [self.pop_imbalance]
+        self.summaries['county_parts_imbalance'] = [self.county_parts_imbalance]
+        self.summaries['whole_districts_imbalance'] = [self.whole_districts_imbalance]
+        return self.summaries
 
     def get_splits(self):
-        self.splits = self.nodes_df[['seed', 'plan', 'county', self.district_type, 'county_parts_target', 'whole_districts_target']].drop_duplicates()
+#         self.splits = self.nodes_df[['seed', 'plan', 'county', self.district_type, 'county_parts_target', 'whole_districts_target']].drop_duplicates()
+        self.splits = self.splits_raw.copy()
+        self.splits['plan'] = self.plan
         self.splits['county_parts'] = self.splits.groupby('county')[self.district_type].transform('count')
         self.splits['whole_district'] = self.splits.groupby(self.district_type)['county'].transform('count') <= 1
         self.splits['whole_districts'] = self.splits.groupby('county')['whole_district'].transform('sum')
         self.splits = self.splits.drop(columns=[self.district_type, 'whole_district']).drop_duplicates()
+        
         self.county_parts_imbalance = (self.splits['county_parts_target'] - self.splits['county_parts']).abs().sum()
         self.whole_districts_imbalance = (self.splits['whole_districts_target'] - self.splits['whole_districts']).abs().sum()
         return self.splits
@@ -121,22 +123,23 @@ class MCMC(Base):
         self.overite_tbl = True
         nx.set_node_attributes(self.graph, self.plan, 'plan')
         self.get_stats()
-        self.plans      = [self.nodes_df[['seed', 'plan', self.district_type]]]
-        self.splits     = [self.get_splits()]
-        self.stats      = [self.get_stats()]
-        self.summaries  = [self.get_summary()]
-        self.hashes     = [self.hash]
+        self.plans_rec     = [self.nodes_df[['seed', 'plan', self.district_type]]]
+        self.splits_rec    = [self.get_splits()]
+        self.stats_rec     = [self.get_stats()]
+        self.summaries_rec = [self.get_summaries()]
+        self.hash_rec    = [self.hash]
         for k in range(1, self.max_steps+1):
             self.plan = k
             nx.set_node_attributes(self.graph, self.plan, 'plan')
+            self.nodes_df['plan'] = self.plan
             msg = f"seed {self.seed} plan {self.plan} pop_imbalance={self.pop_imbalance:.1f}"
 
             if self.recomb():
-                self.plans.append(self.nodes_df[['seed', 'plan', self.district_type]])
-                self.splits.append(self.get_splits())
-                self.stats.append(self.get_stats())
-                self.summaries.append(self.get_summary())
-                self.hashes.append(self.hash)
+                self.plans_rec    .append(self.nodes_df[['seed', 'plan', self.district_type]])
+                self.splits_rec   .append(self.get_splits())
+                self.stats_rec    .append(self.get_stats())
+                self.summaries_rec.append(self.get_summaries())
+                self.hash_rec     .append(self.hash)
 #                 print('success')
                 if self.plan % self.report_period == 0:
                     self.report()
@@ -155,22 +158,21 @@ class MCMC(Base):
 
 
     def save_results(self):
-        return
-#         self.results_path.mkdir(parents=True, exist_ok=True)
-#         self.graph_file = self.results_path / f'graph.gpickle'
-#         nx.write_gpickle(self.graph, self.graph_file)
-#         to_gcs(self.graph_file)
+        self.results_path.mkdir(parents=True, exist_ok=True)
+        self.graph_file = self.results_path / f'graph.gpickle'
+        nx.write_gpickle(self.graph, self.graph_file)
+        to_gcs(self.graph_file)
         
         def reorder(df):
             idx = [c for c in ['seed', 'plan'] if c in df.columns]
             return df[idx + [c for c in df.columns if c not in idx]]
 
-        tbls = {nm: self.results_bq+f'_{nm}' for nm in ['plans', 'splits', 'stats', 'summaries']}
-        if len(self.plans) > 0:
-            self.plans     = pd.concat(self.plans    , axis=0).rename_axis('geoid').reset_index()
-            self.splits    = pd.concat(self.splits   , axis=0).rename_axis('geoid').reset_index()
-            self.stats     = pd.concat(self.stats    , axis=0).rename_axis(self.district_type).reset_index()
-            self.summaries = pd.concat(self.summaries, axis=0)
+        tbls = {f'{nm}_rec': f'{self.results_bq}_{nm}' for nm in ['plans', 'splits', 'stats', 'summaries']}
+        if len(self.plans_rec) > 0:
+            self.plans_rec     = pd.concat(self.plans_rec     , axis=0).rename_axis('geoid').reset_index()
+            self.splits_rec    = pd.concat(self.splits_rec   , axis=0).rename_axis('geoid').reset_index()
+            self.stats_rec     = pd.concat(self.stats_rec    , axis=0).rename_axis(self.district_type).reset_index()
+            self.summaries_rec = pd.concat(self.summaries_rec, axis=0)
 
             for nm, tbl in tbls.items():
                 saved = False
@@ -193,7 +195,7 @@ class MCMC(Base):
                 a = self.rng.choice(pop_diff.index, p=pop_diff)
                 pop_diff.pop(a)
                 yield a
-        L = self.stat['total_pop']
+        L = self.stats['total_pop']
         pop_diff = pd.DataFrame([(x, y, abs(p-q)) for x, p in L.iteritems() for y, q in L.iteritems() if x < y]).set_index([0,1]).squeeze()
         pop_diff = (pop_diff / pop_diff.sum()) ** self.pop_diff_exp
         pairs = gen(pop_diff)
@@ -212,7 +214,7 @@ class MCMC(Base):
                 continue
 #                 else:
 #                     rpt(f'{d0},{d1} connected')
-            P = self.stat['total_pop'].copy()
+            P = self.stats['total_pop'].copy()
             p0 = P.pop(d0)
             p1 = P.pop(d1)
             q = p0 + p1
@@ -233,9 +235,9 @@ class MCMC(Base):
                     # we focus on edges near the center.  Betweenness-centrality is a good metric for this.
                     B = nx.edge_betweenness_centrality(T)
                     B = sorted(B.items(), key=lambda x:x[1], reverse=True)  # sort edges on betweenness-centrality (largest first)
-                    max_tries = int(min(300, 0.2*len(B)))  # number of edge cuts to attempt before giving up on this tree
-                    k = 0
-                    for e, cent in B[:max_tries]:
+                    for e, cent in B:
+                        if cent < 0.01:
+                            break
                         T.remove_edge(*e)
                         comp = nx.connected_components(T)  # T nows has 2 components
                         next(comp)  # second one tends to be smaller → faster to sum over → skip over the first component
@@ -258,15 +260,18 @@ class MCMC(Base):
                         self.nodes_df['old'] = self.nodes_df[self.district_type].copy()
                         self.nodes_df.loc[comp[0], self.district_type] = d0
                         self.nodes_df.loc[comp[1], self.district_type] = d1
-                        county_parts_imbalance_old = self.county_parts_imbalance
-                        whole_districts_imbalance_old = self.whole_districts_imbalance
-                        self.get_splits()
-                        I = (county_parts_imbalance_old - self.county_parts_imbalance) + (whole_districts_imbalance_old - self.whole_districts_imbalance)
-                        if I < 0:
-                            T.add_edge(*e)
-                            self.nodes_df[self.district_type] = self.nodes_df['old']
+                        
+                        if self.pop_imbalance < 1000:
+#                             county_parts_imbalance_old = self.county_parts_imbalance
+#                             whole_districts_imbalance_old = self.whole_districts_imbalance
                             self.get_splits()
-                            continue
+#                             I = (county_parts_imbalance_old - self.county_parts_imbalance) + (whole_districts_imbalance_old - self.whole_districts_imbalance)
+                            I = (self.whole_districts_imbalance_init - self.whole_districts_imbalance) +    (self.county_parts_imbalance_init - self.county_parts_imbalance)
+                            if I < 0:
+                                T.add_edge(*e)
+                                self.nodes_df[self.district_type] = self.nodes_df['old']
+                                self.get_splits()
+                                continue
                             
                             
 
@@ -294,7 +299,7 @@ class MCMC(Base):
                         # update stats
                         self.get_stats()
                         assert abs(self.pop_imbalance - imb_new) < 1e-2, f'disagreement betwen pop_imbalance calculations {self.pop_imbalance} v {imb}'
-                        if self.hash in self.hashes: # if we've already seen that plan before, reject and keep trying for a new one
+                        if self.hash in self.hash_rec: # if we've already seen that plan before, reject and keep trying for a new one
 #                             rpt(f'duplicate plan {self.hash}')
                             T.add_edge(*e)
                             # Restore old district labels

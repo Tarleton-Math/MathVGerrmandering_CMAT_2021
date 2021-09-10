@@ -12,28 +12,28 @@ except:
 from src import *
 start_time = time.time()
 
-# graph_opts = {
-#     'abbr'             : 'TX',
-#     'level'            : 'cntyvtd',
-#     'district_type'    : 'sldl',
-#     'census_yr'        : 2020,
-#     'county_line'      : False,
-# }
+graph_opts = {
+    'abbr'             : 'TX',
+    'level'            : 'cntyvtd',
+    'district_type'    : 'sldl',
+    'census_yr'        : 2020,
+    'county_line'      : False,
+}
 
 mcmc_opts = {
-    'max_steps'             : 6,#100000,
+    'max_steps'             : 200,#100000,
     'pop_diff_exp'          : 2,
     'pop_imbalance_target'  : 0.001,
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
-    'report_period'         : 250,
-    'save_period'           : 3,
+    'report_period'         : 5,
+    'save_period'           : 500,
 }
 
 run_opts = {
-    'seed_start'      : 2000000,
+    'seed_start'      : 3000000,
     'jobs_per_worker' : 1,
-    'workers'         : 4,
+    'workers'         : 8,
 }
 
 yes = (True, 't', 'true', 'y', 'yes')
@@ -134,9 +134,11 @@ b = a + run_opts['jobs_per_worker'] * run_opts['workers']
 seeds = list(range(a, b))
 # print(f'I will run seeds {seeds}', flush=True)
 
-M = f(seeds[0])
-# with multiprocessing.Pool(run_opts['workers']) as pool:
-#     pool.map(multi_f, seeds)
+if run_opts['workers'] <= 1:
+    M = f(seeds[0])
+else:
+    with multiprocessing.Pool(run_opts['workers']) as pool:
+        M =pool.map(multi_f, seeds)
 
 
 # from src.analysis import *
