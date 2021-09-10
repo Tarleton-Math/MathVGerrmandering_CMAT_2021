@@ -15,25 +15,25 @@ start_time = time.time()
 graph_opts = {
     'abbr'             : 'TX',
     'level'            : 'cntyvtd',
-    'district_type'    : 'sldl',
+    'district_type'    : 'cd',
     'census_yr'        : 2020,
     'county_line'      : False,
 }
 
 mcmc_opts = {
-    'max_steps'             : 200,#100000,
+    'max_steps'             : 1000000,
     'pop_diff_exp'          : 2,
-    'pop_imbalance_target'  : 0.001,
+    'pop_imbalance_target'  : 0.1,
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
-    'report_period'         : 5,
+    'report_period'         : 100,
     'save_period'           : 500,
 }
 
 run_opts = {
     'seed_start'      : 3000000,
-    'jobs_per_worker' : 1,
-    'workers'         : 8,
+    'jobs_per_worker' : 5,
+    'workers'         : 80,
 }
 
 yes = (True, 't', 'true', 'y', 'yes')
@@ -128,17 +128,17 @@ def multi_f(seed):
     time.sleep(idx / 100)
     return f(seed)
 
-
-a = run_opts['seed_start']
-b = a + run_opts['jobs_per_worker'] * run_opts['workers']
-seeds = list(range(a, b))
-# print(f'I will run seeds {seeds}', flush=True)
-
 if run_opts['workers'] <= 1:
     M = f(seeds[0])
 else:
-    with multiprocessing.Pool(run_opts['workers']) as pool:
-        M =pool.map(multi_f, seeds)
+    b = run_opts['seed_start']
+    for k in range(run_opts['jobs_per_worker']):
+        a = b
+        b = a + run_opts['workers']
+        seeds = list(range(a, b))
+        # print(f'I will run seeds {seeds}', flush=True)
+        with multiprocessing.Pool(run_opts['workers']) as pool:
+            M = pool.map(multi_f, seeds)
 
 
 # from src.analysis import *
