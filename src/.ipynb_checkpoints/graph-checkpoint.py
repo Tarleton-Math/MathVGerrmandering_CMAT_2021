@@ -56,7 +56,8 @@ class Graph(Variable):
         self.elections     = Elections(g=self)
         self.nodes         = Nodes(g=self)
 
-        self.tbl += f'_{self.g.district_type}'
+        self.tbl = self.nodes.tbl.replace('nodes', 'graph')
+        self.gpickle = self.tbl_to_file().with_suffix('.gpickle')
         exists = super().get()
         try:
             self.graph

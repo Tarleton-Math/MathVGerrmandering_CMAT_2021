@@ -17,7 +17,7 @@ graph_opts = {
     'level'            : 'cntyvtd',
     'district_type'    : 'cd',
     'census_yr'        : 2020,
-    'county_line'      : False,
+    'county_line'      : True,
 }
 
 mcmc_opts = {
@@ -101,8 +101,8 @@ graph_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-#     'nodes',
-#     'graph',
+    'nodes',
+    'graph',
 )
 
 G = Graph(**graph_opts)
@@ -141,10 +141,11 @@ def multi_f(seed):
 #             M = pool.map(multi_f, seeds)
 
 
-from src.analysis import *
-start = time.time()
-A = Analysis(nodes_tbl=G.nodes.tbl)#, batch_size=2, max_results=20)
-A.compute_results()
-print(f'analysis took {time_formatter(time.time() - start)}')
+# from src.analysis import *
+# start = time.time()
+# A = Analysis(nodes_tbl=G.nodes.tbl)#, batch_size=2, max_results=20)
+# A.combine_nodes()
+# # A.compute_results()
+# print(f'analysis took {time_formatter(time.time() - start)}')
 
 print(f'total time elapsed = {time_formatter(time.time() - start_time)}')

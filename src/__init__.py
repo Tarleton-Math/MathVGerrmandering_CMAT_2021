@@ -199,15 +199,20 @@ class Variable(Base):
         a = f'{self.name}_{self.g.state.abbr}'
         b = f'{a}_{self.yr}'
         c = f'{b}_{self.level}'
-        d = f'{c}_{self.g.district_type}'
+#         d = f'{c}_{self.g.district_type}'
         self.zip     = self.path / f'{b}.zip'
         self.pq      = self.path / f'{b}.parquet'
-        self.gpickle = self.path / f'{d}.gpickle'
+#         self.gpickle = self.path / f'{d}.gpickle'
         self.raw     = f'{data_bq}.{b}_raw'
         self.tbl     = f'{data_bq}.{c}'
         self.get()
         os.chdir(code_path)
         print(f'success')
+        
+    def tbl_to_file(self, tbl=None):
+        if tbl is None:
+            tbl = self.tbl
+        return self.path / tbl.split('.')[-1]
         
     def save_tbl(self):
         rpt(f'saving table')

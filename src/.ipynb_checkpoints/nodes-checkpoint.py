@@ -11,7 +11,9 @@ class Nodes(Variable):
 
     def get(self):
         self.tbl += f'_{self.g.district_type}'
-        self.pq = self.gpickle.with_suffix('.parquet')
+        if self.g.county_line:
+            self.tbl += f'_countyline'
+        self.pq = self.tbl_to_file().with_suffix('.parquet')
         self.cols = {'assignments': Levels + District_types,
                      'shapes'     : ['aland', 'polygon'],
                      'census'     : Census_columns['data'],
