@@ -9,7 +9,7 @@ class Analysis(Base):
         
     def __post_init__(self):
         self.results_stem = self.nodes_tbl.split('.')[-1][6:]
-        self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')
+        self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')[:4]
         self.results_bq = f'{root_bq}.{self.results_stem}'
         self.tbl = f'{self.results_bq}.{self.results_stem}_0000000_allresults'
         file = root_path / f'results/{self.results_stem}/{self.results_stem}_0000000_allresults'
@@ -21,19 +21,37 @@ class Analysis(Base):
     def combine_nodes(self):
         A = self.nodes_tbl
         B = f'{A}_countyline'
+        C = f'{A}_combined'
         try:
             bqclient.get_table(B)
         except:
-            return
-#         query = f"""
-        A_cols = get_cols(A)
-        B_cols = get_cols(B)
-        print(set(A_cols).symmetric_difference(B_cols))
+            try:
+                bqclient.get_table(C)
+            except:
+                query = f"""
+select
+    *
+from (
+    select
+        *,
+        row_number() over (partition by geoid) as r
+    from (
+        select * from {A}
+        union all
+        select * from {B}
+        )
+    )
+where
+    r = 1
+"""
+                load_table(tbl=C, query=query)
+            self.nodes_tbl = C
         
         
 
 
     def compute_results(self):
+        self.combine_nodes()
         u = '\nunion all\n'
         self.tbls = dict()
         for src_tbl in bqclient.list_tables(self.results_bq, max_results=self.max_results):
@@ -169,7 +187,7 @@ on
     B.seed = C.seed and B.plan = C.plan
 """ for seed, tbls in self.tbls.items()]
         self.join_tbl = f'{self.tbl}_join'
-        self.join_temp_tbls = run_batches(self.join_query_list, tbl=self.join_tbl, run=True)
+        self.join_temp_tbls = run_batches(self.join_query_list, tbl=self.join_tbl, run=False)
 
 
 
@@ -177,7 +195,6 @@ on
         self.join_batch_stack = u.join([f'select * from {tbl}' for tbl in self.join_temp_tbls])
         self.stack_tbl = f'{self.tbl}_stack'
         load_table(tbl=self.stack_tbl, query=self.join_batch_stack)
-        return
 
 
 
@@ -203,7 +220,7 @@ on
 group by
     seed, plan, {self.district_type}
 """
-#         load_table(tbl=self.tbl, query=self.final_query)
+        load_table(tbl=self.tbl, query=self.final_query)
         
 
     

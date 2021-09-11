@@ -18,7 +18,7 @@ class MCMC(Base):
     def __post_init__(self):
         self.start_time = time.time()
         self.results_stem = self.gpickle.stem[6:]
-        self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')
+        self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')[:4]
         ds = f'{root_bq}.{self.results_stem}'
         try:
             bqclient.create_dataset(ds)
