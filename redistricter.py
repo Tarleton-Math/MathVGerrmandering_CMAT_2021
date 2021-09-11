@@ -143,7 +143,7 @@ def multi_f(seed):
 
 from src.analysis import *
 start = time.time()
-A = Analysis(nodes_tbl=G.nodes.tbl, stack_size=2, max_results=30)
+A = Analysis(nodes_tbl=G.nodes.tbl)#, batch_size=2, max_results=20)
 A.compute_results()
 print(f'analysis took {time_formatter(time.time() - start)}')
 
