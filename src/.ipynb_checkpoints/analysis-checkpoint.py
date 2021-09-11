@@ -201,9 +201,9 @@ class Analysis(Base):
                     query_stack = query
                     
                 if len(query_list) % batch_size == 0:
-                    print(f'running step {k}')
                     temp_tbls.append(f'{self.tbl}_{k}')
                     load_table(tbl=temp_tbls[-1], query=query_stack)
+                    print(f'{len(query_list)} remain')
                     del query_stack
                     k += 1
             return temp_tbls
@@ -304,8 +304,8 @@ on
             
         print('stacking joined table batches')
         join_batch_stack = u.join([f'select * from {tbl}' for tbl in temp_tbls])
-        self.tbl_stack = f'{self.tbl}_stack'
-        load_table(tbl=self.tbl_stack, query=join_batch_stack)
+        self.stack_tbl = f'{self.tbl}_stack'
+        load_table(tbl=self.stack_tbl, query=join_batch_stack)
         for t in temp_tbls:
             delete_table(t)
             
@@ -323,7 +323,7 @@ select
     max(B.total_pop) / max(B.aland) as density,
     {join_str(1).join([f'sum(B.{c}) as {c}' for c in cols])}
 from
-    {self.tbl_stack} as A
+    {self.stack_tbl} as A
 inner join
     {self.nodes_tbl} as B
 on
@@ -332,12 +332,12 @@ group by
     seed, plan, {self.district_type}
 """
         load_table(tbl=self.tbl, query=query)
-        delete_table(self.tbl_stack)
-        delete_table(self.tbl_hash)
-        self.df = read_table(self.tbl)
-        self.df.to_parquet(self.pq)
+        delete_table(self.stack_tbl)
+#         delete_table(self.hash_tbl)
+#         self.df = read_table(self.tbl)
+#         self.df.to_parquet(self.pq)
 #         self.df.to_csv(self.csv)
-        to_gcs(self.pq)
+#         to_gcs(self.pq)
 #         to_gcs(self.csv)
 
 
