@@ -198,6 +198,7 @@ on
 
 
 
+        print('joining and aggregating data')
         self.final_query = f"""
 select
     A.seed,
