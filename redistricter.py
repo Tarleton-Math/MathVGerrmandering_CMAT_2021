@@ -15,7 +15,7 @@ start_time = time.time()
 graph_opts = {
     'abbr'             : 'TX',
     'level'            : 'cntyvtd',
-    'district_type'    : 'cd',
+    'district_type'    : 'sldu',
     'census_yr'        : 2020,
     'county_line'      : False,
 }

@@ -25,10 +25,11 @@ class Analysis(Base):
         try:
             bqclient.get_table(B)
         except:
-            try:
-                bqclient.get_table(C)
-            except:
-                query = f"""
+            return
+        try:
+            bqclient.get_table(C)
+        except:
+            query = f"""
 select
     *
 from (
@@ -44,14 +45,15 @@ from (
 where
     r = 1
 """
-                load_table(tbl=C, query=query)
-            self.nodes_tbl = C
+            load_table(tbl=C, query=query)
+        self.nodes_tbl = C
         
         
 
 
     def compute_results(self):
         self.combine_nodes()
+        print(self.nodes_tbl)
         u = '\nunion all\n'
         self.tbls = dict()
         for src_tbl in bqclient.list_tables(self.results_bq, max_results=self.max_results):
@@ -194,7 +196,7 @@ on
         print('stacking joined table batches')
         self.join_batch_stack = u.join([f'select * from {tbl}' for tbl in self.join_temp_tbls])
         self.stack_tbl = f'{self.tbl}_stack'
-        load_table(tbl=self.stack_tbl, query=self.join_batch_stack)
+#         load_table(tbl=self.stack_tbl, query=self.join_batch_stack)
 
 
 
