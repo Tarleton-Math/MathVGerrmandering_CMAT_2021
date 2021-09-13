@@ -60,11 +60,10 @@ class Graph(Variable):
         self.census        = Census(g=self)
         self.elections     = Elections(g=self)
         
-        self.total_pop = read_table(self.census.tbl, cols=['total_pop']).sum().values
+        self.total_pop = read_table(self.census.tbl, cols=['total_pop']).sum()[0]
         self.target_pop = self.total_pop / self.num_districts
-        print(self.total_pop, self.target_pop)
-        assert 1==2
         self.nodes         = Nodes(g=self)
+        return
 
         self.tbl = self.nodes.tbl.replace('nodes', 'graph')
         self.gpickle = self.tbl_to_file().with_suffix('.gpickle')

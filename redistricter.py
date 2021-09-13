@@ -12,13 +12,13 @@ except:
 from src import *
 start_time = time.time()
 
-# graph_opts = {
-#     'abbr'             : 'TX',
-#     'level'            : 'cntyvtd',
-#     'district_type'    : 'cd',
-#     'census_yr'        : 2020,
-#     'countyline_rule'  : 1,
-# }
+graph_opts = {
+    'abbr'             : 'TX',
+    'level'            : 'cntyvtd',
+    'district_type'    : 'cd',
+    'census_yr'        : 2020,
+    'countyline_rule'  : 3,
+}
 
 mcmc_opts = {
     'max_steps'             : 1000000,
@@ -31,7 +31,7 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'      : 3001000,
+    'seed_start'      : 3005000,
     'jobs_per_worker' : 5,
     'workers'         : 80,
 }
