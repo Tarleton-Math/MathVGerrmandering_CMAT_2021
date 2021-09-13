@@ -35,6 +35,7 @@ class MCMC(Base):
         nx.set_node_attributes(self.graph, self.plan, 'plan')
 
         self.nodes_df = pd.DataFrame.from_dict(dict(self.graph.nodes(data=True)), orient='index')
+        self.new_districts = self.num_district - self.nodes_df[self.district_type].nunique()
         if self.new_districts > 0:
             M = int(self.nodes_df[self.district_type].max())
             for n in self.nodes_df.nlargest(self.new_districts, 'total_pop').index:

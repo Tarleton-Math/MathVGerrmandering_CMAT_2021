@@ -10,9 +10,7 @@ class Nodes(Variable):
 
 
     def get(self):
-        self.tbl += f'_{self.g.district_type}'
-        if self.g.county_line:
-            self.tbl += f'_countyline'
+        self.tbl += f'_{self.g.district_type}_countyline{self.g.countyline_rule}'
         self.pq = self.tbl_to_file().with_suffix('.parquet')
         self.cols = {'assignments': Levels + District_types,
                      'shapes'     : ['aland', 'polygon'],
@@ -26,7 +24,7 @@ class Nodes(Variable):
                 self.process_raw()
             rpt(f'creating table')
             self.process()
-            self.save_tbl()
+#             self.save_tbl()
         return self
 
 
@@ -60,12 +58,13 @@ on
 
 
     def process(self):
+#         cols = ['geoid', self.g.level, 'cnty', 'total_pop']
         if self.level in ['tabblock', 'bg', 'tract', 'cnty']:
-            query_temp = f"select *, substring({self.g.level}, 3) as level_temp from {self.g.assignments.tbl}"
+            query_temp = f"select geoid, cnty, total_pop, {self.g.district_type}, substring({self.g.level}, 3) as level_temp from {self.raw}"
         else:
-            query_temp = f"select *, {self.g.level} as level_temp from {self.g.assignments.tbl}"
+            query_temp = f"select geoid, cnty, total_pop, {self.g.district_type},           {self.g.level}     as level_temp from {self.raw}"
         
-        if not self.g.county_line:
+        if self.g.countyline_rule == 1:
             query_temp = f"""
 select
     geoid,
@@ -74,7 +73,7 @@ from
     ({query_temp})
 """
     
-        else:
+        elif self.g.countyline_rule == 2:
             query_temp = f"""
 select
     geoid,
@@ -89,6 +88,23 @@ from (
         ({query_temp})
     )
 """
+        elif self.g.countyline_rule == 3:
+            query_temp = f"""
+select
+    geoid,
+    case when target_districts > 1 then level_temp else substring(cnty, 3) end as geoid_new,
+from (
+    select
+        geoid,
+        level_temp,
+        cnty,
+        sum(total_pop) over (partition by cnty) / {self.g.target_pop} as target_districts
+    from
+        ({query_temp})
+    )
+"""
+
+
             
         sels = [f'cast(round(sum({c})) as int) as {c}' for c in self.cols['census'] + self.cols['elections']]
         query = f"""

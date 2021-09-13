@@ -19,15 +19,15 @@ class Analysis(Base):
 
         
     def combine_nodes(self):
-        A = self.nodes_tbl
-        B = f'{A}_countyline'
-        C = f'{A}_combined'
+        s = 'countyline'
+        i = self.nodes_tbl.rfind(s)
+        r = self.nodes_tbl[:i]
+        A = r + s + '1'
+        B = r + s + '2'
+        C = r + s + '3'
+        Z = r + 'combined'
         try:
-            bqclient.get_table(B)
-        except:
-            return
-        try:
-            bqclient.get_table(C)
+            bqclient.get_table(Z)
         except:
             query = f"""
 select
@@ -40,12 +40,14 @@ from (
         select * from {A}
         union all
         select * from {B}
+        union all
+        select * from {C}
         )
     )
 where
     r = 1
 """
-            load_table(tbl=C, query=query)
+            load_table(tbl=Z, query=query)
         self.nodes_tbl = C
         
         

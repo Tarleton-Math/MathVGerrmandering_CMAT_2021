@@ -15,7 +15,7 @@ class Graph(Variable):
     census_yr         : int = 2020
     level             : str = 'tract'
     district_type     : str = 'cd'
-    county_line       : bool = False
+    countyline_rule   : int = 3
     node_attrs        : typing.Tuple = ('county', 'total_pop', 'density', 'aland', 'perim', 'polsby_popper')
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
@@ -36,14 +36,19 @@ class Graph(Variable):
         self.yr = self.census_yr
         self.g = self
         
+        if self.district_type == 'cd':
+            self.num_districts = 38
+        elif self.district_type == 'sldu':
+            self.num_districts = 31
+        elif self.district_type == 'sldl':
+            self.num_districts = 150
+        
         self.refresh_all = set(self.refresh_all)
         self.refresh_tbl = set(self.refresh_tbl).union(self.refresh_all)
         if self.name in self.refresh_tbl:
             self.refresh_all.add(self.name)
         super().__post_init__()
         
-#         self.gpickle = data_path / f'graph/{self.abbr_self}/graph_{self.abbr_self}_{self.yr}_{self.level}_{self.district.type}.gpickle'
-#         self.gpickle.parent.mkdir(parents=True, exist_ok=True)
         
     def get(self):
         s = set(self.refresh_tbl).union(self.refresh_all).difference(('nodes', 'graph'))
@@ -54,6 +59,11 @@ class Graph(Variable):
         self.shapes        = Shapes(g=self)
         self.census        = Census(g=self)
         self.elections     = Elections(g=self)
+        
+        self.total_pop = read_table(self.census.tbl, cols=['total_pop']).sum().values
+        self.target_pop = self.total_pop / self.num_districts
+        print(self.total_pop, self.target_pop)
+        assert 1==2
         self.nodes         = Nodes(g=self)
 
         self.tbl = self.nodes.tbl.replace('nodes', 'graph')
