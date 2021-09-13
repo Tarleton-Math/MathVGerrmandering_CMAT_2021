@@ -146,7 +146,7 @@ from (
         cast(seed as int) as seed,
         cast(plan as int) as plan,
         cast({self.district_type} as int) as {self.district_type},
-        geoid
+        geoid,
     from
         {tbls['plans']}
     ) as A
@@ -208,14 +208,21 @@ select
     A.{self.district_type},
     max(A.hash_plan) as hash_plan,
     max(A.pop_imbalance_plan) as pop_imbalance_plan,
+    max(nodes_plan) as nodes_plan,
+    count(*) as nodes_district,
     max(A.polsby_popper_plan) as polsby_popper_plan,
     max(A.polsby_popper_district) as polsby_popper_district,
     max(A.aland) as aland,
     max(A.total_pop) as total_pop,
     case when max(A.aland) > 0 then max(A.total_pop) / max(A.aland) else 0 end as density,
     {join_str(1).join([f'sum(B.{c}) as {c}' for c in self.cols])}
-from
-    {self.stack_tbl} as A
+from (
+    select
+        *,
+        count(*) over (partition by seed, plan) as nodes_plan
+    from
+        {self.stack_tbl}
+    ) as A
 inner join
     {self.nodes_tbl} as B
 on
