@@ -83,10 +83,10 @@ from src.nodes import *
 nodes_opts['refresh_all'] = (
 #     'crosswalks',
 #     'assignments',
-    'shapes',
-    'census',
-    'elections',
-    'nodes',
+#     'shapes',
+#     'census',
+#     'elections',
+#     'nodes',
 #     'graph',
 )
 nodes_opts['refresh_tbl'] = (
