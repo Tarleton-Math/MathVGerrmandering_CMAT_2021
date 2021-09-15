@@ -4,12 +4,12 @@ class Elections(Variable):
     name: str = 'elections'
 
     def __post_init__(self):
-        self.yr = self.g.shapes_yr
+        self.yr = self.n.shapes_yr
         super().__post_init__()
 
 
     def get(self):
-        if self.g.state.abbr != 'TX':
+        if self.n.state.abbr != 'TX':
             print(f'elections only implemented for TX')
             return
 
@@ -60,7 +60,7 @@ class Elections(Variable):
         c = f'cntyvtd'
         df[c]     = df['fips'].str.rjust(3, '0') + df['vtd']         .str.rjust(6, '0')
         df['alt'] = df['fips'].str.rjust(3, '0') + df['vtd'].str[:-1].str.rjust(6, '0')
-        assign = read_table(self.g.assignments.tbl)[c].drop_duplicates()
+        assign = read_table(self.n.assignments.tbl)[c].drop_duplicates()
         
         # find cntyvtd in elections not among assignments
         unmatched = ~df[c].isin(assign)
@@ -86,16 +86,16 @@ class Elections(Variable):
 select
     A.geoid,
     B.county,
-    concat(B.office, "_", B.election_yr, "_", B.race, "_", B.party, "_", B.candidate) as election,
+    concat(B.office, "_", B.election_yr, "_", B.party, "_", B.candidate, "_", B.race) as election,
     B.votes * A.cntyvtd_pop_prop as votes,
 from 
-    {self.g.census.tbl} as A
+    {self.n.census.tbl} as A
 inner join
     {self.raw} as B
 on
     A.cntyvtd = B.cntyvtd
 where
-    {sep.join(f'({x})' for x in self.g.election_filters)}
+    {sep.join(f'({x})' for x in self.n.election_filters)}
 order by
     geoid
 """

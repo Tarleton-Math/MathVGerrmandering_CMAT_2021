@@ -9,7 +9,7 @@ class Crosswalks(Variable):
 
 
     def get(self):
-        self.url = f"https://www2.census.gov/geo/docs/maps-data/data/rel2020/t10t20/TAB2010_TAB2020_ST{self.g.state.fips}.zip"
+        self.url = f"https://www2.census.gov/geo/docs/maps-data/data/rel2020/t10t20/TAB2010_TAB2020_ST{self.n.state.fips}.zip"
         exists = super().get()
         if not exists['tbl']:
             self.get_zip()

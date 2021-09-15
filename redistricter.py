@@ -12,12 +12,11 @@ except:
 from src import *
 start_time = time.time()
 
-graph_opts = {
+nodes_opts = {
     'abbr'             : 'TX',
     'level'            : 'cntyvtd',
     'district_type'    : 'cd',
-    'census_yr'        : 2020,
-    'countyline_rule'  : 3,
+    'contract_thresh'  : 4,
 }
 
 mcmc_opts = {
@@ -33,7 +32,7 @@ mcmc_opts = {
 run_opts = {
     'seed_start'      : 3005000,
     'jobs_per_worker' : 5,
-    'workers'         : 80,
+    'workers'         : 2,
 }
 
 yes = (True, 't', 'true', 'y', 'yes')
@@ -53,11 +52,11 @@ except:
         skip_inputs = False
 
 if not skip_inputs:
-    graph_opts = get_inputs(graph_opts)
+    nodes_opts = get_inputs(nodes_opts)
     mcmc_opts  = get_inputs(mcmc_opts)
     run_opts = get_inputs(run_opts)
 
-graph_opts['election_filters'] = (
+nodes_opts['election_filters'] = (
     "office='President' and race='general'",
     "office='USSen' and race='general'",
     "left(office, 5)='USRep' and race='general'",
@@ -73,20 +72,24 @@ if mcmc_opts['pop_imbalance_stop'].lower() in yes:
     mcmc_opts['pop_imbalance_stop'] = True
 else:
     mcmc_opts['pop_imbalance_stop'] = False
-    
-if graph_opts['district_type'] == 'cd':
-    mcmc_opts['new_districts'] = 2
-else:
-    mcmc_opts['new_districts'] = 0
-    
+
 for opt in ['seed_start', 'jobs_per_worker', 'workers']:
     run_opts[opt] = int(run_opts[opt])
 
 ################# Get Data and Make Graph if necessary #################
 
-from src.graph import *
+from src.nodes import *
 
-graph_opts['refresh_all'] = (
+nodes_opts['refresh_all'] = (
+#     'crosswalks',
+#     'assignments',
+    'shapes',
+    'census',
+    'elections',
+    'nodes',
+#     'graph',
+)
+nodes_opts['refresh_tbl'] = (
 #     'crosswalks',
 #     'assignments',
 #     'shapes',
@@ -95,38 +98,30 @@ graph_opts['refresh_all'] = (
 #     'nodes',
 #     'graph',
 )
-graph_opts['refresh_tbl'] = (
-#     'crosswalks',
-#     'assignments',
-#     'shapes',
-#     'census',
-#     'elections',
-#     'nodes',
-#     'graph',
-)
 
-G = Graph(**graph_opts)
+N = Nodes(**nodes_opts)
+mcmc_opts['nodes'] = N.tbl
 
 ################# Run MCMC #################
 
-from src.mcmc import *
-import multiprocessing
+# from src.mcmc import *
+# import multiprocessing
 
-save = os.getenv('PYTHONHASHSEED') == HASHSEED
-if save:
-    print(f'hashseed == {HASHSEED} so results are ARE reproducible and WILL be saved to BigQuery')
-else:
-    print(f'hashseed != {HASHSEED} so results are NOT reproducible and will NOT be saved to BigQuery')
+# save = os.getenv('PYTHONHASHSEED') == HASHSEED
+# if save:
+#     print(f'hashseed == {HASHSEED} so results are ARE reproducible and WILL be saved to BigQuery')
+# else:
+#     print(f'hashseed != {HASHSEED} so results are NOT reproducible and will NOT be saved to BigQuery')
 
-def f(seed):    
-    M = MCMC(seed=seed, gpickle=G.gpickle, save=save, **mcmc_opts)
-    M.run_chain()
-    return M
+# def f(seed):    
+#     M = MCMC(seed=seed, gpickle=G.gpickle, save=save, **mcmc_opts)
+#     M.run_chain()
+#     return M
     
-def multi_f(seed):
-    idx = multiprocessing.current_process()._identity[0]
-    time.sleep(idx / 100)
-    return f(seed)
+# def multi_f(seed):
+#     idx = multiprocessing.current_process()._identity[0]
+#     time.sleep(idx / 100)
+#     return f(seed)
 
 # if run_opts['workers'] <= 1:
 #     M = f(seeds[0])
@@ -136,7 +131,7 @@ def multi_f(seed):
 #         a = b
 #         b = a + run_opts['workers']
 #         seeds = list(range(a, b))
-#         # print(f'I will run seeds {seeds}', flush=True)
+#         print(f'I will run seeds {seeds}', flush=True)
 #         with multiprocessing.Pool(run_opts['workers']) as pool:
 #             M = pool.map(multi_f, seeds)
 

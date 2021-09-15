@@ -3,20 +3,21 @@ from . import *
 @dataclasses.dataclass
 class MCMC(Base):
     max_steps             : int
-    gpickle               : str
-    save                  : bool = True
+    nodes                 : str
     seed                  : int = 0
-    new_districts         : int = 0
     anneal                : float = 0.0
-    pop_diff_exp          : int = 0
+    pop_diff_exp          : int = 2
     pop_imbalance_target  : float = 1.0
     pop_imbalance_stop    : bool = True
     report_period         : int = 500
     save_period           : int = 500
-    
+    node_attrs            : typing.Tuple = ('county', 'total_pop', 'density', 'aland', 'perim', 'polsby_popper')
 
     def __post_init__(self):
         self.start_time = time.time()
+        
+        
+        
         self.results_stem = self.gpickle.stem[6:]
         self.abbr, self.yr, self.level, self.district_type = self.results_stem.split('_')[:4]
         ds = f'{root_bq}.{self.results_stem}'

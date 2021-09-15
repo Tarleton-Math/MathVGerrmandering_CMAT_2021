@@ -15,7 +15,7 @@ class Graph(Variable):
     census_yr         : int = 2020
     level             : str = 'tract'
     district_type     : str = 'cd'
-    countyline_rule   : int = 3
+    contract_thresh   : int = 3
     node_attrs        : typing.Tuple = ('county', 'total_pop', 'density', 'aland', 'perim', 'polsby_popper')
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
@@ -36,13 +36,6 @@ class Graph(Variable):
         self.yr = self.census_yr
         self.g = self
         
-        if self.district_type == 'cd':
-            self.num_districts = 38
-        elif self.district_type == 'sldu':
-            self.num_districts = 31
-        elif self.district_type == 'sldl':
-            self.num_districts = 150
-        
         self.refresh_all = set(self.refresh_all)
         self.refresh_tbl = set(self.refresh_tbl).union(self.refresh_all)
         if self.name in self.refresh_tbl:
@@ -60,10 +53,9 @@ class Graph(Variable):
         self.census        = Census(g=self)
         self.elections     = Elections(g=self)
         
-        self.total_pop = read_table(self.census.tbl, cols=['total_pop']).sum()[0]
-        self.target_pop = self.total_pop / self.num_districts
+        self.total_pop     = read_table(self.census.tbl, cols=['total_pop']).sum()[0]
+        self.target_pop    = self.total_pop / Seats[self.district_type]
         self.nodes         = Nodes(g=self)
-        return
 
         self.tbl = self.nodes.tbl.replace('nodes', 'graph')
         self.gpickle = self.tbl_to_file().with_suffix('.gpickle')
@@ -117,44 +109,73 @@ order by
         nx.set_node_attributes(self.graph, self.nodes.df.to_dict('index'))
 
         print(f'connecting districts')
-        for D, N in self.nodes.df.groupby(self.district_type):
+        rng = np.random.default_rng(0)
+        for D in np.unique(self.nodes.df[self.district_type]):
             while True:
-                H = self.graph.subgraph(N.index)
+                H = nx.subgraph_view(self.graph, filter_node=lambda n: self.graph.nodes[n][self.district_type] == D)
                 comp = get_components(H)
                 rpt(f"District {self.district_type} {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}")
-
                 if len(comp) == 1:
                     print('connected')
                     break
                 else:
                     rpt('adding edges')
-                    C = ["', '".join(c) for c in comp[:2]]
-                    query = f"""
-select
-    geoid_x,
-    geoid_y,
-    distance,
-    0.0 as shared_perim
-from (
-    select
-        *,
-        min(distance) over () as min_distance
-    from (
-        select
-            x.geoid as geoid_x,
-            y.geoid as geoid_y,
-            st_distance(x.point, y.point) / {meters_per_mile} as distance
-        from
-            {self.nodes.tbl} as x,
-            {self.nodes.tbl} as y
-        where
-            x.geoid < y.geoid
-            and x.geoid in ('{C[0]}')
-            and y.geoid in ('{C[1]}')
-        )
-    )
-where distance < 1.05 * min_distance
-"""
-                    new_edges = run_query(query)
-                    self.graph.update(self.edges_to_graph(new_edges))
+                    for c in comp[1:]:
+                        for x in c:
+                            y = rng.choice(self.graph[x])
+                            d = self.graph.nodes[y][self.district_type]
+                            self.graph.nodes[x][self.district_type] = d
+                            self.nodes.df.loc[x, self.district_type] = d        
+        
+#         for D, N in self.nodes.df.groupby(self.district_type):
+#             while True:
+#                 H = self.graph.subgraph(N.index)
+#                 comp = get_components(H)
+#                 rpt(f"District {self.district_type} {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}")
+
+#                 if len(comp) == 1:
+#                     print('connected')
+#                     break
+#                 else:
+#                     rpt('adding edges')
+#                     for c in comp[2:]:
+#                         for x in c:
+#                             y = rng.choice(self.graph[x])
+#                             print(self.graph.nodes[x][self.district_type])
+#                             self.node
+# #                             self.graph.nodes[x][self.district_type] = self.graph.nodes[y][self.district_type]
+#                             print(self.graph.nodes[x][self.district_type])
+#                             assert 1==2
+                    
+                    
+                    
+#                     C = ["', '".join(c) for c in comp[:2]]
+#                     query = f"""
+# select
+#     geoid_x,
+#     geoid_y,
+#     distance,
+#     0.0 as shared_perim
+# from (
+#     select
+#         *,
+#         min(distance) over () as min_distance
+#     from (
+#         select
+#             x.geoid as geoid_x,
+#             y.geoid as geoid_y,
+#             st_distance(x.point, y.point) / {meters_per_mile} as distance
+#         from
+#             {self.nodes.tbl} as x,
+#             {self.nodes.tbl} as y
+#         where
+#             x.geoid < y.geoid
+#             and x.geoid in ('{C[0]}')
+#             and y.geoid in ('{C[1]}')
+#         )
+#     )
+# where distance < 1.05 * min_distance
+# """
+#                     new_edges = run_query(query)
+#                     self.graph.update(self.edges_to_graph(new_edges))
                 print('done')

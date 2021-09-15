@@ -4,7 +4,7 @@ class Assignments(Variable):
     name: str = 'assignments'
     
     def __post_init__(self):
-        self.yr = self.g.shapes_yr
+        self.yr = self.n.shapes_yr
         super().__post_init__()
 
 
@@ -12,7 +12,7 @@ class Assignments(Variable):
         self.url = f"https://www2.census.gov/geo/docs/maps-data/data/baf"
         if self.yr == 2020:
             self.url += '2020'
-        self.url += f"/BlockAssign_ST{self.g.state.fips}_{self.g.state.abbr.upper()}.zip"
+        self.url += f"/BlockAssign_ST{self.n.state.fips}_{self.n.state.abbr.upper()}.zip"
         
         exists = super().get()
         if not exists['tbl']:

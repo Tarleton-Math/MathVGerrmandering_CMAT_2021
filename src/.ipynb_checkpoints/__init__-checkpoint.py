@@ -32,6 +32,7 @@ gcs_bucket = gcsclient.get_bucket(gcs_path)
 
 Levels = ['cntyvtd', 'tabblock', 'bg', 'tract', 'cnty', 'state']
 District_types = ['cd', 'sldu', 'sldl']
+Seats = {'cd':38, 'sldu':31, 'sldl':150}
 Years = [2010, 2020]
 concat_str = ' ... '
 meters_per_mile = 1609.344
@@ -190,16 +191,16 @@ class Base():
 
 @dataclasses.dataclass
 class Variable(Base):
-    g     : typing.Any
+    n     : typing.Any
     name  : str = 'variable'
     level : str = 'tabblock'
 
     def __post_init__(self):
-        self.path = data_path / f'{self.name}/{self.g.state.abbr}'
-        a = f'{self.name}_{self.g.state.abbr}'
+        self.path = data_path / f'{self.name}/{self.n.state.abbr}'
+        a = f'{self.name}_{self.n.state.abbr}'
         b = f'{a}_{self.yr}'
         c = f'{b}_{self.level}'
-#         d = f'{c}_{self.g.district_type}'
+#         d = f'{c}_{self.n.district_type}'
         self.zip     = self.path / f'{b}.zip'
         self.pq      = self.path / f'{b}.parquet'
 #         self.gpickle = self.path / f'{d}.gpickle'
@@ -243,10 +244,10 @@ class Variable(Base):
 
     def get(self):
         rpt(f"Get {self.tbl.split('.')[-1]}".ljust(33, ' '))
-        if self.name in self.g.refresh_tbl:
+        if self.name in self.n.refresh_tbl:
             delete_table(self.tbl)
             
-        if self.name in self.g.refresh_all:
+        if self.name in self.n.refresh_all:
             delete_table(self.raw)
             shutil.rmtree(self.path, ignore_errors=True)
     

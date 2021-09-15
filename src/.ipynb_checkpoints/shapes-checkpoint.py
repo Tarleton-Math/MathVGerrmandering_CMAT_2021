@@ -4,7 +4,7 @@ class Shapes(Variable):
     name: str = 'shapes'
 
     def __post_init__(self):
-        self.yr = self.g.shapes_yr
+        self.yr = self.n.shapes_yr
         super().__post_init__()
 
 
@@ -14,7 +14,7 @@ class Shapes(Variable):
             self.url += '/2010'
         elif self.yr == 2020 and self.level == 'tabblock':
             self.url += '20'
-        self.url += f"/tl_{self.yr}_{self.g.state.fips}_{self.level}{str(self.yr)[-2:]}"
+        self.url += f"/tl_{self.yr}_{self.n.state.fips}_{self.level}{str(self.yr)[-2:]}"
         if self.yr == 2020 and self.level in ['tract', 'bg']:
             self.url = self.url[:-2]
         self.url += '.zip'

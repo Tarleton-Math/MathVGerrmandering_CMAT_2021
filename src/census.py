@@ -4,12 +4,12 @@ class Census(Variable):
     name: str = 'census'
     
     def __post_init__(self):
-        self.yr = self.g.census_yr
+        self.yr = self.n.census_yr
         super().__post_init__()
 
 
     def get(self):
-        self.url = f"https://www2.census.gov/programs-surveys/decennial/{self.yr}/data/01-Redistricting_File--PL_94-171/{self.g.state.name.replace(' ', '_')}/{self.g.state.abbr.lower()}{self.yr}.pl.zip"
+        self.url = f"https://www2.census.gov/programs-surveys/decennial/{self.yr}/data/01-Redistricting_File--PL_94-171/{self.n.state.name.replace(' ', '_')}/{self.n.state.abbr.lower()}{self.yr}.pl.zip"
         
         exists = super().get()
         if not exists['tbl']:
@@ -88,7 +88,7 @@ order by
 
     def process(self):
 ######## Use crosswalks to push 2010 data on 2010 tabblocks onto 2020 tabblocks ########
-        if self.g.census_yr == self.g.shapes_yr:
+        if self.n.census_yr == self.n.shapes_yr:
             query = f"""
 select
     geoid,
@@ -100,14 +100,14 @@ from
         else:
             query = f"""
 select
-    E.geoid_{self.g.shapes_yr} as geoid,
+    E.geoid_{self.n.shapes_yr} as geoid,
     {join_str(1).join([f'sum(D.{c} * E.aland_prop) as {c}' for c in Census_columns['data']])}
 from
     {self.raw} as D
 inner join
-    {self.g.crosswalks.tbl} as E
+    {self.n.crosswalks.tbl} as E
 on
-    D.geoid = E.geoid_{self.g.census_yr}
+    D.geoid = E.geoid_{self.n.census_yr}
 group by
     geoid
 """
@@ -116,17 +116,26 @@ group by
 ######## We will use this later to apportion votes from cntyvtd to its tabblocks  ########
         query = f"""
 select
-    G.*,
-    F.cntyvtd,
-    sum(G.total_pop) over (partition by F.cntyvtd) as cntyvtd_pop,
-    case when (sum(G.total_pop) over (partition by F.cntyvtd)) > 0 then G.total_pop / (sum(G.total_pop) over (partition by F.cntyvtd)) else 1 / (count(*) over (partition by F.cntyvtd)) end as cntyvtd_pop_prop,
-from 
-    {self.g.assignments.tbl} as F
-inner join(
-    {subquery(query)}
-    ) as G
-on
-    F.geoid = G.geoid
+    *,
+    case when cntyvtd_pop > 0 then total_pop / cntyvtd_pop else 1 / cntyvtd_count end as cntyvtd_pop_prop,
+    total_pop_prop * {Seats['cd']} as seats_cd,
+    total_pop_prop * {Seats['sldu']} as seats_sldu,
+    total_pop_prop * {Seats['sldl']} as seats_sldl
+from (
+    select
+        G.*,
+        F.cntyvtd,
+        G.total_pop / sum(G.total_pop) over () as total_pop_prop,
+        sum(G.total_pop) over (partition by F.cntyvtd) as cntyvtd_pop,
+        count(*) over (partition by F.cntyvtd) as cntyvtd_count
+    from 
+        {self.n.assignments.tbl} as F
+    inner join(
+        {subquery(query)}
+        ) as G
+    on
+        F.geoid = G.geoid
+    )
 order by
     geoid
 """

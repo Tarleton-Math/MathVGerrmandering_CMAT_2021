@@ -1,20 +1,65 @@
 from . import *
+from .crosswalks import Crosswalks
+from .assignments import Assignments
+from .shapes import Shapes
+from .census import Census
+from .elections import Elections
+
 @dataclasses.dataclass
 class Nodes(Variable):
-    name: str = 'nodes'
+    name              : str = 'nodes'
+    abbr              : str = 'TX'
+    shapes_yr         : int = 2020
+    census_yr         : int = 2020
+    level             : str = 'tract'
+    district_type     : str = 'cd'
+    contract_thresh   : int = 3
+    refresh_tbl       : typing.Tuple = ()
+    refresh_all       : typing.Tuple = ()
+    election_filters  : typing.Tuple = (
+        "office='USSen' and race='general'",
+        "office='President' and race='general'",
+        "office like 'USRep%' and race='general'")
+    n                 : typing.Any = None
+
 
     def __post_init__(self):
-        self.yr = self.g.shapes_yr
-        self.level = self.g.level
+        check_level(self.level)
+        check_district_type(self.district_type)
+        check_year(self.census_yr)
+        check_year(self.shapes_yr)
+
+        self.state = states[states['abbr']==self.abbr].iloc[0]
+        self.__dict__.update(self.state)
+        self.yr = self.census_yr
+        
+        self.refresh_all = set(self.refresh_all)
+        self.refresh_tbl = set(self.refresh_tbl).union(self.refresh_all)
+        if self.name in self.refresh_tbl:
+            self.refresh_all.add(self.name)
+        self.n = self
         super().__post_init__()
 
 
     def get(self):
-        self.tbl += f'_{self.g.district_type}_countyline{self.g.countyline_rule}'
+        s = set(self.refresh_tbl).union(self.refresh_all).difference(('nodes', 'graph'))
+        if len(s) > 0:
+            self.refresh_all = listify(self.refresh_all) + ['nodes', 'graph']
+        self.crosswalks    = Crosswalks(n=self)
+        self.assignments   = Assignments(n=self)
+        self.shapes        = Shapes(n=self)
+        self.census        = Census(n=self)
+        self.elections     = Elections(n=self)
+        
+        self.total_pop     = read_table(self.census.tbl, cols=['total_pop']).sum()[0]
+        self.target_pop    = self.total_pop / Seats[self.district_type]
+        
+        self.tbl += f'_{self.district_type}_contract{self.contract_thresh}'
         self.pq = self.tbl_to_file().with_suffix('.parquet')
+        self.seats_col = f'seats_{self.g.district_type}'
         self.cols = {'assignments': Levels + District_types,
                      'shapes'     : ['aland', 'polygon'],
-                     'census'     : Census_columns['data'],
+                     'census'     : ['total_pop_prop', 'seats_cd', 'seats_sldu', 'seats_sldl'] + Census_columns['data'],
                      'elections'  : [c for c in get_cols(self.g.elections.tbl) if c not in ['geoid', 'county']]
                     }
         exists = super().get()
@@ -58,47 +103,46 @@ on
 
 
     def process(self):
-#         cols = ['geoid', self.g.level, 'cnty', 'total_pop']
         if self.level in ['tabblock', 'bg', 'tract', 'cnty']:
-            query_temp = f"select geoid, cnty, total_pop, {self.g.district_type}, substring({self.g.level}, 3) as level_temp from {self.raw}"
+            query_temp = f"select geoid, cnty, {self.seats_col}, substring({self.g.level}, 3) as level from {self.raw}"
         else:
-            query_temp = f"select geoid, cnty, total_pop, {self.g.district_type},           {self.g.level}     as level_temp from {self.raw}"
+            query_temp = f"select geoid, cnty, {self.seats_col},           {self.g.level}     as level from {self.raw}"
         
-        if self.g.countyline_rule == 1:
+        if self.g.contract_thresh < 1:
             query_temp = f"""
 select
     geoid,
-    level_temp as geoid_new,
+    level as geoid_new,
 from
     ({query_temp})
 """
     
-        elif self.g.countyline_rule == 2:
+        elif self.g.contract_thresh == 2010:
             query_temp = f"""
 select
     geoid,
-    case when ct > 1 then level_temp else substring(cnty, 3) end as geoid_new,
+    case when ct = 1 then substring(cnty, 3) else level end as geoid_new
 from (
     select
         geoid,
-        level_temp,
+        level,
         cnty,
         count(distinct {self.g.district_type}) over (partition by cnty) as ct,
     from
         ({query_temp})
     )
 """
-        elif self.g.countyline_rule == 3:
+        elif self.g.contract_thresh >= 1:
             query_temp = f"""
 select
     geoid,
-    case when target_districts > 1 then level_temp else substring(cnty, 3) end as geoid_new,
+    case when 10 * seats < {self.g.contract_thresh} then substring(cnty, 3) else level end as geoid_new
 from (
     select
         geoid,
-        level_temp,
+        level,
         cnty,
-        sum(total_pop) over (partition by cnty) / {self.g.target_pop} as target_districts
+        sum({self.seats_col}) over (partition by cnty) as seats,
     from
         ({query_temp})
     )
@@ -120,21 +164,26 @@ from (
     from (
         select
             geoid_new as geoid,
-            max(county) as county,
-            --max(district) as {self.g.district_type},
-            cast(max(district) as int) as {self.g.district_type},
+            max(county_new) as county,
+            cast(max(district_new) as int) as {self.g.district_type},
             {join_str(3).join(sels)},
             st_union_agg(polygon) as polygon,
             sum(aland) / {meters_per_mile**2} as aland
         from (
             select
                 *,
-                case when N = (max(N) over (partition by geoid_new)) then {self.g.district_type} else NULL end as district
+                case when N_county   = (max(N_county)   over (partition by geoid_new)) then county               else NULL end as county_new,
+                case when N_district = (max(N_district) over (partition by geoid_new)) then {self.g.district_type} else NULL end as district_new,
+                --case when N_sldu = (max(N_sldu) over (partition by geoid_new)) then sldu else NULL end as sldu,
+                --case when N_sldl = (max(N_sldl) over (partition by geoid_new)) then sldl else NULL end as sldl
             from (
                 select
                     A.geoid_new,
                     B.*,
-                    count(1) over (partition by geoid_new, {self.g.district_type}) as N
+                    count(1) over (partition by geoid_new, county)                 as N_county,
+                    count(1) over (partition by geoid_new, {self.g.district_type}) as N_district,
+--                    count(1) over (partition by geoid_new, sldu)   as N_sldu,
+  --                  count(1) over (partition by geoid_new, sldl)   as N_sldl
                 from (
                     {subquery(query_temp, 5)}
                     ) as A
