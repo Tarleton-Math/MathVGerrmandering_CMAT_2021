@@ -30,7 +30,7 @@ data_bq  = root_bq  + '.redistricting_data'
 bqclient.create_dataset(data_bq , exists_ok=True)
 gcs_bucket = gcsclient.get_bucket(gcs_path)
 
-Levels = ['cntyvtd', 'tabblock', 'bg', 'tract', 'cnty', 'state']
+Levels = ['cntyvtd', 'tabblock', 'bg', 'tract', 'cnty']
 District_types = ['cd', 'sldu', 'sldl']
 Seats = {'cd':38, 'sldu':31, 'sldl':150}
 Years = [2010, 2020]
@@ -200,10 +200,8 @@ class Variable(Base):
         a = f'{self.name}_{self.n.state.abbr}'
         b = f'{a}_{self.yr}'
         c = f'{b}_{self.level}'
-#         d = f'{c}_{self.n.district_type}'
         self.zip     = self.path / f'{b}.zip'
         self.pq      = self.path / f'{b}.parquet'
-#         self.gpickle = self.path / f'{d}.gpickle'
         self.raw     = f'{data_bq}.{b}_raw'
         self.tbl     = f'{data_bq}.{c}'
         self.get()

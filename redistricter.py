@@ -8,33 +8,8 @@ except:
         os.environ['PYTHONHASHSEED'] = HASHSEED
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
-################# Define parameters #################
+################# Initial Setup #################
 from src import *
-start_time = time.time()
-
-nodes_opts = {
-    'abbr'             : 'TX',
-    'level'            : 'cntyvtd',
-    'district_type'    : 'cd',
-    'contract_thresh'  : 4,
-}
-
-mcmc_opts = {
-    'max_steps'             : 1000000,
-    'pop_diff_exp'          : 2,
-    'pop_imbalance_target'  : 0.1,
-    'pop_imbalance_stop'    : 'True',
-    'anneal'                : 0,
-    'report_period'         : 100,
-    'save_period'           : 500,
-}
-
-run_opts = {
-    'seed_start'      : 3005000,
-    'jobs_per_worker' : 5,
-    'workers'         : 2,
-}
-
 yes = (True, 't', 'true', 'y', 'yes')
 def get_inputs(opts):
     for opt, default in opts.items():
@@ -50,35 +25,24 @@ except:
         skip_inputs = sys.argv[1].lower() in yes
     except:
         skip_inputs = False
+        
+################# Get data & make nodes #################
+from src.nodes import *
 
+nodes_opts = {
+    'abbr'             : 'TX',
+    'level'            : 'bg',
+    'district_type'    : 'cd',
+    'contract_thresh'  : 0,
+}
 if not skip_inputs:
     nodes_opts = get_inputs(nodes_opts)
-    mcmc_opts  = get_inputs(mcmc_opts)
-    run_opts = get_inputs(run_opts)
 
 nodes_opts['election_filters'] = (
     "office='President' and race='general'",
     "office='USSen' and race='general'",
     "left(office, 5)='USRep' and race='general'",
 )
-
-for opt in ['max_steps', 'pop_diff_exp', 'report_period']:
-    mcmc_opts[opt] = int(mcmc_opts[opt])
-
-for opt in ['pop_imbalance_target', 'anneal']:
-    mcmc_opts[opt] = float(mcmc_opts[opt])
-    
-if mcmc_opts['pop_imbalance_stop'].lower() in yes:
-    mcmc_opts['pop_imbalance_stop'] = True
-else:
-    mcmc_opts['pop_imbalance_stop'] = False
-
-for opt in ['seed_start', 'jobs_per_worker', 'workers']:
-    run_opts[opt] = int(run_opts[opt])
-
-################# Get Data and Make Graph if necessary #################
-
-from src.nodes import *
 
 nodes_opts['refresh_all'] = (
 #     'crosswalks',
@@ -100,40 +64,69 @@ nodes_opts['refresh_tbl'] = (
 )
 
 N = Nodes(**nodes_opts)
-mcmc_opts['nodes'] = N.tbl
 
-################# Run MCMC #################
+################# Make graph and run MCMC #################
 
-# from src.mcmc import *
-# import multiprocessing
+from src.mcmc import *
+import multiprocessing
 
-# save = os.getenv('PYTHONHASHSEED') == HASHSEED
-# if save:
-#     print(f'hashseed == {HASHSEED} so results are ARE reproducible and WILL be saved to BigQuery')
-# else:
-#     print(f'hashseed != {HASHSEED} so results are NOT reproducible and will NOT be saved to BigQuery')
+mcmc_opts = {
+    'max_steps'             : 1000000,
+    'pop_diff_exp'          : 2,
+    'pop_imbalance_target'  : 0.1,
+    'pop_imbalance_stop'    : 'True',
+    'anneal'                : 0,
+    'report_period'         : 100,
+    'save_period'           : 500,
+}
+if not skip_inputs:
+    mcmc_opts  = get_inputs(mcmc_opts)
+mcmc_opts['nodes_tbl'] = N.tbl
 
-# def f(seed):    
-#     M = MCMC(seed=seed, gpickle=G.gpickle, save=save, **mcmc_opts)
-#     M.run_chain()
-#     return M
+
+run_opts = {
+    'seed_start'      : 3005000,
+    'jobs_per_worker' : 1,
+    'workers'         : 1,
+}
+if not skip_inputs:
+    run_opts = get_inputs(run_opts)
+
+
+if os.getenv('PYTHONHASHSEED') == HASHSEED:
+    mcmc_opts['save'] = True
+    print(f'hashseed == {HASHSEED} so results are ARE reproducible and WILL be saved to BigQuery')
+else:
+    mcmc_opts['save'] = False
+    print(f'hashseed != {HASHSEED} so results are NOT reproducible and will NOT be saved to BigQuery')
+
+
+def f(random_seed):
+    M = MCMC(random_seed=random_seed, **mcmc_opts)
+    M.run_chain()
+    return M
     
-# def multi_f(seed):
-#     idx = multiprocessing.current_process()._identity[0]
-#     time.sleep(idx / 100)
-#     return f(seed)
+def multi_f(random_seed):
+    idx = multiprocessing.current_process()._identity[0]
+    time.sleep(idx / 100)
+    return f(random_seed)
 
-# if run_opts['workers'] <= 1:
-#     M = f(seeds[0])
-# else:
-#     b = run_opts['seed_start']
-#     for k in range(run_opts['jobs_per_worker']):
-#         a = b
-#         b = a + run_opts['workers']
-#         seeds = list(range(a, b))
-#         print(f'I will run seeds {seeds}', flush=True)
-#         with multiprocessing.Pool(run_opts['workers']) as pool:
-#             M = pool.map(multi_f, seeds)
+a = run_opts['seed_start']
+b = a + run_opts['jobs_per_worker'] * run_opts['workers']
+random_seeds = np.arange(a, b)
+
+start_time = time.time()
+if run_opts['workers'] == 1:
+    for s in random_seeds:
+        M = f(s)
+else:
+    with multiprocessing.Pool(run_opts['workers']) as pool:
+        M = pool.map(multi_f, random_seeds)
+print(f'total time elapsed = {time_formatter(time.time() - start_time)}')
+
+################# Post-Processing & Analysis #################
+
+
 
 
 # from src.analysis import *

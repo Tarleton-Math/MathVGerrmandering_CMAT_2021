@@ -11,9 +11,9 @@ class Nodes(Variable):
     abbr              : str = 'TX'
     shapes_yr         : int = 2020
     census_yr         : int = 2020
-    level             : str = 'tract'
+    level             : str = 'cntyvtd'
     district_type     : str = 'cd'
-    contract_thresh   : int = 3
+    contract_thresh   : int = 0
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
     election_filters  : typing.Tuple = (
@@ -55,13 +55,12 @@ class Nodes(Variable):
         self.target_pop    = self.total_pop / Seats[self.district_type]
         
         self.tbl += f'_{self.district_type}_contract{self.contract_thresh}'
-        
         self.pq = self.tbl_to_file().with_suffix('.parquet')
-        self.seats_col = f'seats_{self.g.district_type}'
+        self.seats_col = f'seats_{self.district_type}'
         self.cols = {'assignments': Levels + District_types,
                      'shapes'     : ['aland', 'polygon'],
                      'census'     : ['total_pop_prop', 'seats_cd', 'seats_sldu', 'seats_sldl'] + Census_columns['data'],
-                     'elections'  : [c for c in get_cols(self.g.elections.tbl) if c not in ['geoid', 'county']]
+                     'elections'  : [c for c in get_cols(self.elections.tbl) if c not in ['geoid', 'county']]
                     }
         exists = super().get()
         if not exists['tbl']:
@@ -86,17 +85,17 @@ select
     max(E.county) over (partition by cnty) as county,
     {join_str(1).join(sels)},
 from
-    {self.g.assignments.tbl} as A
+    {self.assignments.tbl} as A
 left join
-    {self.g.shapes.tbl} as S
+    {self.shapes.tbl} as S
 on
     A.geoid = S.geoid
 left join
-    {self.g.census.tbl} as C
+    {self.census.tbl} as C
 on
     A.geoid = C.geoid
 left join
-    {self.g.elections.tbl} as E
+    {self.elections.tbl} as E
 on
     A.geoid = E.geoid
 """
@@ -105,11 +104,11 @@ on
 
     def process(self):
         if self.level in ['tabblock', 'bg', 'tract', 'cnty']:
-            query_temp = f"select geoid, cnty, {self.seats_col}, substring({self.g.level}, 3) as level from {self.raw}"
+            query_temp = f"select geoid, cnty, {self.seats_col}, substring({self.level}, 3) as level from {self.raw}"
         else:
-            query_temp = f"select geoid, cnty, {self.seats_col},           {self.g.level}     as level from {self.raw}"
+            query_temp = f"select geoid, cnty, {self.seats_col},           {self.level}     as level from {self.raw}"
         
-        if self.g.contract_thresh < 1:
+        if self.contract_thresh == 0:
             query_temp = f"""
 select
     geoid,
@@ -118,7 +117,7 @@ from
     ({query_temp})
 """
     
-        elif self.g.contract_thresh == 2010:
+        elif self.contract_thresh == 2010:
             query_temp = f"""
 select
     geoid,
@@ -128,16 +127,16 @@ from (
         geoid,
         level,
         cnty,
-        count(distinct {self.g.district_type}) over (partition by cnty) as ct,
+        count(distinct {self.district_type}) over (partition by cnty) as ct,
     from
         ({query_temp})
     )
 """
-        elif self.g.contract_thresh >= 1:
+        else:
             query_temp = f"""
 select
     geoid,
-    case when 10 * seats < {self.g.contract_thresh} then substring(cnty, 3) else level end as geoid_new
+    case when 10 * seats < {self.contract_thresh} then substring(cnty, 3) else level end as geoid_new
 from (
     select
         geoid,
@@ -166,7 +165,7 @@ from (
         select
             geoid_new as geoid,
             max(county_new) as county,
-            cast(max(district_new) as int) as {self.g.district_type},
+            cast(max(district_new) as int) as {self.district_type},
             {join_str(3).join(sels)},
             st_union_agg(polygon) as polygon,
             sum(aland) / {meters_per_mile**2} as aland
@@ -174,17 +173,13 @@ from (
             select
                 *,
                 case when N_county   = (max(N_county)   over (partition by geoid_new)) then county               else NULL end as county_new,
-                case when N_district = (max(N_district) over (partition by geoid_new)) then {self.g.district_type} else NULL end as district_new,
-                --case when N_sldu = (max(N_sldu) over (partition by geoid_new)) then sldu else NULL end as sldu,
-                --case when N_sldl = (max(N_sldl) over (partition by geoid_new)) then sldl else NULL end as sldl
+                case when N_district = (max(N_district) over (partition by geoid_new)) then {self.district_type} else NULL end as district_new,
             from (
                 select
                     A.geoid_new,
                     B.*,
                     count(1) over (partition by geoid_new, county)                 as N_county,
-                    count(1) over (partition by geoid_new, {self.g.district_type}) as N_district,
---                    count(1) over (partition by geoid_new, sldu)   as N_sldu,
-  --                  count(1) over (partition by geoid_new, sldl)   as N_sldl
+                    count(1) over (partition by geoid_new, {self.district_type}) as N_district,
                 from (
                     {subquery(query_temp, 5)}
                     ) as A
