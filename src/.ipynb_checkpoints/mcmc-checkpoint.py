@@ -9,6 +9,7 @@ class MCMC(Base):
     pop_deviation_target  : float = 1.0
     pop_deviation_stop    : bool = True
     defect_valid_activate : float = 1000.0
+    defect_valid_factor   : float = 1.0
     anneal                : float = 0.0
     save                  : bool = True
     save_period           : int = 500
@@ -338,7 +339,7 @@ order by
                         
                         if self.pop_deviation < self.defect_valid_activate:
                             self.get_splits()
-                            I = self.defect_init - self.defect
+                            I = self.defect_valid_factor * self.defect_init - self.defect
                             if I < 0:
                                 T.add_edge(*e)
                                 self.nodes_df[self.district_type] = self.nodes_df['old']

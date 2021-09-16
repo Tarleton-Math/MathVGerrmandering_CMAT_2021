@@ -47,6 +47,7 @@ mcmc_opts = {
     'pop_deviation_target'  : 0.01,
     'pop_deviation_stop'    : 'True',
     'defect_valid_activate' : 1000,
+    'defect_valid_factor'   : 1.0,
     'anneal'                : 0,
     'report_period'         : 50,
     'save_period'           : 500,
