@@ -34,6 +34,7 @@ class MCMC(Base):
         self.pq = self.path / f'{self.name}.parquet'
         self.gpickle = self.pq.with_suffix('.gpickle')
         self.tbl = f'{self.ds}.{self.stem}_0000000_allresults'
+        self.algorithm_description = f'contract_thres
     
         try:
             bqclient.create_dataset(self.ds)
