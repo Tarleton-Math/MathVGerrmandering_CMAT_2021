@@ -147,7 +147,7 @@ from (
 """
 
 
-        floats = ['total_pop_prop', self.seats_col]
+        floats = ['total_pop_prop', 'seats_cd', 'seats_sldu', 'seats_sldl']
         sels = [f'sum({c}) as {c}' for c in floats] + [f'cast(round(sum({c})) as int) as {c}' for c in self.cols['census'] + self.cols['elections'] if c not in floats]
         
         query = f"""

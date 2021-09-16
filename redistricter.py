@@ -63,7 +63,7 @@ nodes_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-#     'nodes'
+    'nodes'
 )
 
 N = Nodes(**nodes_opts)
