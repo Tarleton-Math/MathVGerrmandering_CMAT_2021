@@ -37,18 +37,18 @@ from src.nodes import *
 nodes_opts = {
     'abbr'             : 'TX',
     'level'            : 'cntyvtd',
-    'district_type'    : 'sldl',
-    'contract_thresh'  : 3,
+    'district_type'    : 'cd',
+    'contract_thresh'  : 10,
 }
     
 mcmc_opts = {
     'max_steps'             : 1000000,
     'pop_diff_exp'          : 2,
-    'pop_deviation_target'  : 10,
+    'pop_deviation_target'  : 0.01,
     'pop_deviation_stop'    : 'True',
     'defect_valid_activate' : 1000,
     'anneal'                : 0,
-    'report_period'         : 5,
+    'report_period'         : 50,
     'save_period'           : 500,
 }
 

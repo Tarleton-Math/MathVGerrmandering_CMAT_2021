@@ -46,23 +46,6 @@ class MCMC(Base):
         self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.district_type, self.seats_col] + list(self.node_attrs)).set_index('geoid')
         self.nodes_df['random_seed'] = self.random_seed
         
-        new_districts = Seats[self.district_type] - self.nodes_df[self.district_type].nunique()
-        M = int(self.nodes_df[self.district_type].max()) + 1
-        N = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
-        while new_districts > 0:
-            n = N.pop(0)
-            rpt(f'try to start district {M} at node {n}')
-            D = self.nodes_df.loc[n, self.district_type]
-            self.nodes_df.loc[n, self.district_type] = M
-            comp = self.get_components_district(D)
-            if len(comp) == 1:
-                rpt('success')
-                M += 1
-                new_districts -= 1
-            else:
-                rpt('fail')
-                self.nodes_df.loc[n, self.district_type] = D
-
         self.plan = 0
         self.get_districts()
         self.total_pop  = self.nodes_df['total_pop'].sum()
@@ -129,6 +112,27 @@ order by
                             y = self.rng.choice(list(self.graph.neighbors(x)))
                             self.nodes_df.loc[x, self.district_type] = self.nodes_df.loc[y, self.district_type]
 
+        new_districts = Seats[self.district_type] - self.nodes_df[self.district_type].nunique()
+        M = int(self.nodes_df[self.district_type].max()) + 1
+        N = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
+        while new_districts > 0:
+            n = N.pop(0)
+#             rpt(f'try to start district {M} at node {n}')
+            D = self.nodes_df.loc[n, self.district_type]
+            self.nodes_df.loc[n, self.district_type] = M
+            comp = self.get_components_district(D)
+            if len(comp) == 1:
+#                 rpt('success')
+                M += 1
+                new_districts -= 1
+            else:
+#                 rpt('fail')
+                self.nodes_df.loc[n, self.district_type] = D
+
+        self.nodes_df['plan'] = self.plan
+        nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
+
+                
 
     def get_stats(self):
         self.get_districts()
@@ -191,8 +195,6 @@ order by
     def run_chain(self):
         self.get_graph()
         self.plan = 0
-        self.nodes_df['plan'] = self.plan
-        nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
         self.overwrite_tbl = True
         self.get_stats()
         self.plans_rec     = [self.nodes_df[['random_seed', 'plan', self.district_type]]]
@@ -336,7 +338,7 @@ order by
                         
                         if self.pop_deviation < self.defect_valid_activate:
                             self.get_splits()
-                            I = 3*self.defect_init - self.defect
+                            I = self.defect_init - self.defect
                             if I < 0:
                                 T.add_edge(*e)
                                 self.nodes_df[self.district_type] = self.nodes_df['old']
