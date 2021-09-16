@@ -48,9 +48,6 @@ class Nodes(Variable):
         self.census        = Census(n=self)
         self.elections     = Elections(n=self)
         
-        self.total_pop     = read_table(self.census.tbl, cols=['total_pop']).sum()[0]
-        self.target_pop    = self.total_pop / Seats[self.district_type]
-        
         self.tbl += f'_{self.district_type}_contract{self.contract_thresh}'
         self.pq = self.tbl_to_file().with_suffix('.parquet')
         self.seats_col = f'seats_{self.district_type}'

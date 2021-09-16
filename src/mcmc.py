@@ -5,12 +5,12 @@ class MCMC(Base):
     nodes_tbl             : str
     max_steps             : int = 0
     random_seed           : int = 0
-    anneal                : float = 0.0
     pop_diff_exp          : int = 2
     pop_deviation_target  : float = 1.0
     pop_deviation_stop    : bool = True
-    save                  : bool = True
     defect_valid_activate : float = 1000.0
+    anneal                : float = 0.0
+    save                  : bool = True
     save_period           : int = 500
     report_period         : int = 500
     edge_attrs            : typing.Tuple = ('distance', 'shared_perim')
@@ -19,25 +19,25 @@ class MCMC(Base):
     batch_size            : int = 100
     pop_deviation_thresh  : float = 10.0
 
-    
 
     def __post_init__(self):
         self.start_time = time.time()
         w = self.nodes_tbl.split('.')[-1].split('_')[1:]
         self.abbr, self.yr, self.level, self.district_type, self.contract_thresh = w
-        self.results_stem = '_'.join(w)
-        self.results_name = f'{self.results_stem}_{self.random_seed}'
+        self.stem = '_'.join(w)
+        self.name = f'{self.stem}_{self.random_seed}'
 
-        self.results_ds = f'{root_bq}.{self.results_stem}'
-        self.results_bq = self.results_ds + f'.{self.results_name}'
-        self.results_path = root_path / f'results/{self.results_stem}'
-        self.results_pq = self.results_path / f'{self.results_name}.parquet'
-       
+        self.ds = f'{root_bq}.{self.stem}'
+        self.bq = self.ds + f'.{self.name}'
+        self.path = root_path / f'results/{self.stem}'
+        self.pq = self.path / f'{self.name}.parquet'
+        self.gpickle = self.pq.with_suffix('.gpickle')   
+    
         try:
-            bqclient.create_dataset(self.results_ds)
+            bqclient.create_dataset(self.ds)
         except:
             pass
-        self.results_path.mkdir(parents=True, exist_ok=True)
+        self.path.mkdir(parents=True, exist_ok=True)
         
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
@@ -45,8 +45,6 @@ class MCMC(Base):
         self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.district_type, self.seats_col] + list(self.node_attrs)).set_index('geoid')
         self.nodes_df['random_seed'] = self.random_seed
         
-#         self.get_graph()
-
         new_districts = Seats[self.district_type] - self.nodes_df[self.district_type].nunique()
         M = int(self.nodes_df[self.district_type].max()) + 1
         N = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
@@ -113,7 +111,6 @@ order by
 """
         self.edges = run_query(query)
         self.graph = self.edges_to_graph(self.edges)
-
         
         print(f'connecting districts')
         for D in np.unique(self.nodes_df[self.district_type]):
@@ -130,14 +127,7 @@ order by
                         for x in c:
                             y = self.rng.choice(list(self.graph.neighbors(x)))
                             self.nodes_df.loc[x, self.district_type] = self.nodes_df.loc[y, self.district_type]
-        
-        
-        
-    def edges_tuple(self, G=None):
-        if G is None:
-            G = self.graph
-        return tuple(sorted(tuple((min(u,v), max(u,v)) for u, v in G.edges)))
-    
+
 
     def get_stats(self):
         self.get_districts()
@@ -199,10 +189,10 @@ order by
         
     def run_chain(self):
         self.get_graph()
-        nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
-        self.overwrite_tbl = True
         self.plan = 0
         self.nodes_df['plan'] = self.plan
+        nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
+        self.overwrite_tbl = True
         self.get_stats()
         self.plans_rec     = [self.nodes_df[['random_seed', 'plan', self.district_type]]]
         self.splits_rec    = [self.get_splits()]
@@ -236,16 +226,15 @@ order by
 
 
     def save_results(self):
-        self.results_path.mkdir(parents=True, exist_ok=True)
-        self.graph_file = self.results_path / f'graph.gpickle'
-        nx.write_gpickle(self.graph, self.graph_file)
+        self.path.mkdir(parents=True, exist_ok=True)
+        nx.write_gpickle(self.graph, self.gpickle)
         to_gcs(self.graph_file)
         
         def reorder(df):
             idx = [c for c in ['random_seed', 'plan'] if c in df.columns]
             return df[idx + [c for c in df.columns if c not in idx]]
 
-        tbls = {f'{nm}_rec': f'{self.results_bq}_{nm}' for nm in ['plans', 'splits', 'stats', 'summaries']}
+        tbls = {f'{nm}_rec': f'{self.bq}_{nm}' for nm in ['plans', 'splits', 'stats', 'summaries']}
         if len(self.plans_rec) > 0:
             self.plans_rec     = pd.concat(self.plans_rec     , axis=0).rename_axis('geoid').reset_index()
             self.splits_rec    = pd.concat(self.splits_rec   , axis=0).rename_axis('geoid').reset_index()
@@ -265,6 +254,12 @@ order by
                 assert saved, f'I tried to write the result of random_seed {self.random_seed} {i} times without success - giving up'
             self.overwrite_tbl = False
 
+
+    def edges_tuple(self, G=None):
+        if G is None:
+            G = self.graph
+        return tuple(sorted(tuple((min(u,v), max(u,v)) for u, v in G.edges)))
+        
 
     def recomb(self):
         def gen(pop_diff):
@@ -324,7 +319,7 @@ order by
                         if s > t:  # ensure s < t
                             s, t = t, s
                         imb_new = (abs(max(t, P_max) - self.target_pop) + abs(min(s, P_min) - self.target_pop)) / self.target_pop * 100  # compute new pop deviation
-                        I = 3*self.pop_deviation - imb_new
+                        I = self.pop_deviation - imb_new
                         if I < 0:
                             if self.anneal < 1e-7:
                                 if I < -0.01:
@@ -341,7 +336,7 @@ order by
                         
                         if self.pop_deviation < self.defect_valid_activate:
                             self.get_splits()
-                            I = self.defect_init - self.defect
+                            I = 3*self.defect_init - self.defect
                             if I < 0:
                                 T.add_edge(*e)
                                 self.nodes_df[self.district_type] = self.nodes_df['old']
@@ -386,12 +381,11 @@ order by
 
 
 
-
     def post_process(self):
-        self.tbl = f'{self.results_ds}.{self.results_stem}_0000000_allresults'
+        self.tbl = f'{self.ds}.{self.stem}_0000000_allresults'
         u = '\nunion all\n'
         self.tbls = dict()
-        for src_tbl in bqclient.list_tables(self.results_ds, max_results=self.max_results):
+        for src_tbl in bqclient.list_tables(self.ds, max_results=self.max_results):
             full  = src_tbl.full_table_id.replace(':', '.')
             short = src_tbl.table_id
             random_seed = short.split('_')[-2]
@@ -438,7 +432,6 @@ from
         self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=False)
 
 
-        
         print('stacking hash batches')
         self.hash_batch_stack = u.join([f'select * from {tbl}' for tbl in self.hash_temp_tbls])
         self.hash_batch_stack = f"""
@@ -470,9 +463,9 @@ select
     C.whole_defect_plan,
     C.intersect_defect_plan,
     C.defect_plan,
-    C.pop_imbalance_plan,
-    --C.pop_deviation_plan,
-    --B.pop_deviation_district,
+    --C.pop_imbalance_plan,
+    C.pop_deviation_plan,
+    B.pop_deviation_district,
     C.polsby_popper_plan,
     B.polsby_popper_district,
     B.aland,
@@ -508,8 +501,8 @@ inner join (
         select
             cast(random_seed as int) as random_seed,
             cast(plan as int) as plan,
-            --pop_deviation as pop_deviation_plan,
-            pop_imbalance as pop_imbalance_plan,
+            pop_deviation as pop_deviation_plan,
+            --pop_imbalance as pop_imbalance_plan,
             whole_defect as whole_defect_plan,
             intersect_defect as intersect_defect_plan,
             defect as defect_plan,
@@ -517,8 +510,8 @@ inner join (
         from
             {tbls['summaries']}
         where
-            --pop_deviation < {self.pop_deviation_thresh}
-            pop_imbalance < {self.pop_deviation_thresh}
+            pop_deviation < {self.pop_deviation_thresh}
+            --pop_imbalance < {self.pop_deviation_thresh}
         ) as X
     inner join
         {self.hash_tbl} as Y
@@ -547,8 +540,8 @@ select
     A.plan,
     A.{self.district_type},
     max(A.hash_plan) as hash_plan,
-    --max(A.pop_deviation_plan) as pop_deviation_plan,
-    max(A.pop_imbalance_plan) as pop_imbalance_plan,
+    max(A.pop_deviation_plan) as pop_deviation_plan,
+    --max(A.pop_imbalance_plan) as pop_imbalance_plan,
     max(nodes_plan) as nodes_plan,
     count(*) as nodes_district,
     max(A.polsby_popper_plan) as polsby_popper_plan,
