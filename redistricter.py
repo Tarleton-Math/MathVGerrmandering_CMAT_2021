@@ -34,12 +34,12 @@ except:
 ################# Get data & make nodes #################
 from src.nodes import *
 
-# nodes_opts = {
-#     'abbr'             : 'TX',
-#     'level'            : 'cntyvtd',
-#     'district_type'    : 'sldl',
-#     'contract_thresh'  : 0,
-# }
+nodes_opts = {
+    'abbr'             : 'TX',
+    'level'            : 'cntyvtd',
+    'district_type'    : 'sldl',
+    'contract_thresh'  : 5,
+}
 if not skip_inputs:
     nodes_opts = get_inputs(nodes_opts)
 
@@ -63,7 +63,7 @@ nodes_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-    'nodes'
+#     'nodes'
 )
 
 N = Nodes(**nodes_opts)
@@ -76,7 +76,7 @@ import multiprocessing
 mcmc_opts = {
     'max_steps'             : 1000000,
     'pop_diff_exp'          : 2,
-    'pop_imbalance_target'  : 0.1,
+    'pop_imbalance_target'  : 10,
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
     'report_period'         : 100,
@@ -88,9 +88,9 @@ mcmc_opts['nodes_tbl'] = N.tbl
 
 
 run_opts = {
-    'seed_start'      : 1000000,
+    'seed_start'      : 1000200,
     'jobs_per_worker' : 1,
-    'workers'         : 1,
+    'workers'         : 800,
 }
 if not skip_inputs:
     run_opts = get_inputs(run_opts)
