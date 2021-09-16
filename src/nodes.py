@@ -170,14 +170,14 @@ from (
         from (
             select
                 *,
-                case when N_county   = (max(N_county)   over (partition by geoid_new)) then county               else NULL end as county_new,
-                case when N_district = (max(N_district) over (partition by geoid_new)) then {self.district_type} else NULL end as district_new,
+                case when A_county   >= (max(A_county)   over (partition by geoid_new)) then county               else NULL end as county_new,
+                case when A_district >= (max(A_district) over (partition by geoid_new)) then {self.district_type} else NULL end as district_new,
             from (
                 select
                     A.geoid_new,
                     B.*,
-                    count(1) over (partition by geoid_new, county)                 as N_county,
-                    count(1) over (partition by geoid_new, {self.district_type}) as N_district,
+                    sum(aland) over (partition by geoid_new, county)               as A_county,
+                    sum(aland) over (partition by geoid_new, {self.district_type}) as A_district,
                 from (
                     {subquery(query_temp, 5)}
                     ) as A

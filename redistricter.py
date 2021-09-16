@@ -37,7 +37,7 @@ from src.nodes import *
 nodes_opts = {
     'abbr'             : 'TX',
     'level'            : 'cntyvtd',
-    'district_type'    : 'cd',
+    'district_type'    : 'sldl',
     'contract_thresh'  : 10,
 }
 if not skip_inputs:
@@ -63,7 +63,7 @@ nodes_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-#     'nodes'
+    'nodes'
 )
 
 N = Nodes(**nodes_opts)

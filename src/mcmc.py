@@ -214,9 +214,6 @@ order by
     def run_chain(self):
         self.plan = 0
         self.nodes_df['plan'] = self.plan
-
-#         nx.set_node_attributes(self.graph, self.plan, 'plan')
-        
         self.get_stats()
         self.plans_rec     = [self.nodes_df[['random_seed', 'plan', self.district_type]]]
         self.splits_rec    = [self.get_splits()]
@@ -226,9 +223,6 @@ order by
         for k in range(1, self.max_steps+1):
             self.plan = k
             self.nodes_df['plan'] = self.plan
-            
-#             nx.set_node_attributes(self.graph, self.plan, 'plan')
-#             self.nodes_df['plan'] = self.plan
             msg = f"random_seed {self.random_seed} plan {self.plan} pop_imbalance={self.pop_imbalance:.1f}"
 
             if self.recomb():
