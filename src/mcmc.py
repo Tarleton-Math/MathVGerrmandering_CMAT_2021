@@ -188,7 +188,7 @@ order by
         self.splits['whole'] = self.splits.groupby(self.district_type)['county'].transform('count') <= 1
         self.splits['whole_districts'] = self.splits.groupby('county')['whole'].transform('sum')
         self.splits = self.splits.drop(columns=[self.district_type, 'whole']).drop_duplicates()
-        self.intersections_defect = (np.ceil(self.splits[self.seats_col]) - self.splits['intersections']).abs().sum().astype(int)
+        self.intersections_defect   = (np.ceil (self.splits[self.seats_col]) - self.splits['intersections']).abs().sum().astype(int)
         self.whole_districts_defect = (np.floor(self.splits[self.seats_col]) - self.splits['whole_districts']).abs().sum().astype(int)
         self.defect = self.intersections_defect + self.whole_districts_defect
         
@@ -352,18 +352,18 @@ order by
                         self.nodes_df.loc[comp[0], self.district_type] = d0
                         self.nodes_df.loc[comp[1], self.district_type] = d1
                         
-                        if self.pop_imbalance < 1000:
+#                         if self.pop_imbalance < 1000:
 #                             intersections_defect_old = self.intersections_defect
 #                             whole_districts_defect_old = self.whole_districts_defect
-                            self.get_splits()
+#                             self.get_splits()
 #                             I = (intersections_defect_old - self.intersections_defect) + (whole_districts_imbalance_old - self.whole_districts_defect)
 #                             I = (self.whole_districts_defect_init - self.whole_districts_defect) + (self.intersections_defect_init - self.intersections_defect)
-                            I = self.defect_init - self.defect
-                            if I < 0:
-                                T.add_edge(*e)
-                                self.nodes_df[self.district_type] = self.nodes_df['old']
-                                self.get_splits()
-                                continue
+#                             I = self.defect_init - self.defect
+#                             if I < 0:
+#                                 T.add_edge(*e)
+#                                 self.nodes_df[self.district_type] = self.nodes_df['old']
+#                                 self.get_splits()
+#                                 continue
                             
                             
 

@@ -38,7 +38,7 @@ nodes_opts = {
     'abbr'             : 'TX',
     'level'            : 'cntyvtd',
     'district_type'    : 'sldl',
-    'contract_thresh'  : 10,
+    'contract_thresh'  : 0,
 }
 if not skip_inputs:
     nodes_opts = get_inputs(nodes_opts)
@@ -63,7 +63,7 @@ nodes_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-    'nodes'
+#     'nodes'
 )
 
 N = Nodes(**nodes_opts)
@@ -88,8 +88,8 @@ mcmc_opts['nodes_tbl'] = N.tbl
 
 
 run_opts = {
-    'seed_start'      : 3005000,
-    'jobs_per_worker' : 1,
+    'seed_start'      : 1000000,
+    'jobs_per_worker' : 5,
     'workers'         : 1,
 }
 if not skip_inputs:
