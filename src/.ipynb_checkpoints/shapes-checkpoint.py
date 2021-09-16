@@ -39,8 +39,8 @@ class Shapes(Variable):
             rpt(f'starting row {a}')
             df = lower(gpd.read_file(self.path, rows=slice(a, a+chunk_size)))
             df.columns = [x[:-2] if x[-2:].isnumeric() else x for x in df.columns]
-            df = df[['geoid', 'aland', 'geometry']]#, 'intptlat', 'intptlon']]
-            df['geometry'] = df['geometry'].apply(lambda p: orient(p, -1))
+            df = df[['geoid', 'aland', 'geometry']]
+            df['geometry'] = df['geometry'].buffer(1).apply(lambda p: orient(p, -1))
             load_table(self.raw, df=df.to_wkb(), overwrite=a==0)
             if df.shape[0] < chunk_size:
                 break
