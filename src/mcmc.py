@@ -2,18 +2,23 @@ from . import *
 
 @dataclasses.dataclass
 class MCMC(Base):
-    max_steps             : int
     nodes_tbl             : str
+    max_steps             : int = 0
     random_seed           : int = 0
     anneal                : float = 0.0
     pop_diff_exp          : int = 2
-    pop_imbalance_target  : float = 1.0
-    pop_imbalance_stop    : bool = True
+    pop_deviation_target  : float = 1.0
+    pop_deviation_stop    : bool = True
     save                  : bool = True
+    defect_valid_activate : float = 1000.0
     save_period           : int = 500
     report_period         : int = 500
     edge_attrs            : typing.Tuple = ('distance', 'shared_perim')
     node_attrs            : typing.Tuple = ('total_pop', 'aland', 'perim')
+    max_results           : int = None
+    batch_size            : int = 100
+    pop_deviation_thresh  : float = 10.0
+
     
 
     def __post_init__(self):
@@ -23,13 +28,13 @@ class MCMC(Base):
         self.results_stem = '_'.join(w)
         self.results_name = f'{self.results_stem}_{self.random_seed}'
 
-        ds = f'{root_bq}.{self.results_stem}'
-        self.results_bq = ds + f'.{self.results_name}'
+        self.results_ds = f'{root_bq}.{self.results_stem}'
+        self.results_bq = self.results_ds + f'.{self.results_name}'
         self.results_path = root_path / f'results/{self.results_stem}'
         self.results_pq = self.results_path / f'{self.results_name}.parquet'
        
         try:
-            bqclient.create_dataset(ds)
+            bqclient.create_dataset(self.results_ds)
         except:
             pass
         self.results_path.mkdir(parents=True, exist_ok=True)
@@ -40,7 +45,7 @@ class MCMC(Base):
         self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.district_type, self.seats_col] + list(self.node_attrs)).set_index('geoid')
         self.nodes_df['random_seed'] = self.random_seed
         
-        self.get_graph()
+#         self.get_graph()
 
         new_districts = Seats[self.district_type] - self.nodes_df[self.district_type].nunique()
         M = int(self.nodes_df[self.district_type].max()) + 1
@@ -63,11 +68,9 @@ class MCMC(Base):
         self.get_districts()
         self.total_pop  = self.nodes_df['total_pop'].sum()
         self.target_pop = self.total_pop / Seats[self.district_type]
-        nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
-        
         self.get_splits()
         self.defect_init = self.defect
-        self.report()
+
         
     def get_districts(self):
         grp = self.nodes_df.groupby(self.district_type)
@@ -86,7 +89,7 @@ class MCMC(Base):
         return sorted([sorted(tuple(x)) for x in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
 
     def get_graph(self):
-        rpt(f'getting edges')
+#         rpt(f'getting edges')
         query = f"""
 select
     *
@@ -150,19 +153,21 @@ order by
             for k, v in s.items():
                 self.stats.loc[d, k] = v
         self.stats['total_pop'] = self.stats['total_pop'].astype(int)
+        self.stats['pop_deviation'] = (self.stats['total_pop'] - self.target_pop).abs() / self.target_pop
         self.stats['plan'] = int(self.plan)
         self.stats['random_seed'] = int(self.random_seed)
-        self.pop_imbalance = (abs(self.stats['total_pop'].max() - self.target_pop) + abs(self.stats['total_pop'].min() - self.target_pop)) / self.target_pop * 100
+        self.pop_deviation = (abs(self.stats['total_pop'].max() - self.target_pop) + abs(self.stats['total_pop'].min() - self.target_pop)) / self.target_pop * 100
         return self.stats
 
 
     def get_summaries(self):
+        self.get_splits()
         self.summaries = pd.DataFrame()
         self.summaries['random_seed'] = [self.random_seed]
         self.summaries['plan'] = [self.plan]
         self.summaries['hash'] = [self.hash]
         self.summaries['polsby_popper']  = [self.stats['polsby_popper'].mean()]
-        self.summaries['pop_imbalance'] = [self.pop_imbalance]
+        self.summaries['pop_deviation'] = [self.pop_deviation]
         self.summaries['intersect_defect'] = [self.intersect_defect]
         self.summaries['whole_defect'] = [self.whole_defect]
         self.summaries['defect'] = [self.defect]
@@ -189,10 +194,12 @@ order by
     def report(self):
         self.get_splits()
         self.get_stats()
-        print(f'\nrandom_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_imbal={self.pop_imbalance:.1f}, intersect_defect={self.intersect_defect}, whole_defect={self.whole_defect}', flush=True)
+        print(f'random_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_deviation={self.pop_deviation:.1f}, intersect_defect={self.intersect_defect}, whole_defect={self.whole_defect}', flush=True)
 
         
     def run_chain(self):
+        self.get_graph()
+        nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
         self.overwrite_tbl = True
         self.plan = 0
         self.nodes_df['plan'] = self.plan
@@ -205,7 +212,7 @@ order by
         for k in range(1, self.max_steps+1):
             self.plan = k
             self.nodes_df['plan'] = self.plan
-            msg = f"random_seed {self.random_seed} plan {self.plan} pop_imbalance={self.pop_imbalance:.1f}"
+            msg = f"random_seed {self.random_seed} plan {self.plan} pop_deviation={self.pop_deviation:.1f}"
 
             if self.recomb():
                 self.plans_rec    .append(self.nodes_df[['random_seed', 'plan', self.district_type]])
@@ -217,8 +224,8 @@ order by
                     self.report()
                 if self.plan % self.save_period == 0:
                     self.save_results()
-                if self.pop_imbalance_stop:
-                    if self.pop_imbalance < self.pop_imbalance_target:
+                if self.pop_deviation_stop:
+                    if self.pop_deviation < self.pop_deviation_target:
                         break
             else:
                 rpt(msg)
@@ -316,8 +323,8 @@ order by
                         t = q - s  # pop of component 0 (recall q is the combined pop of d0&d1)
                         if s > t:  # ensure s < t
                             s, t = t, s
-                        imb_new = (abs(max(t, P_max) - self.target_pop) + abs(min(s, P_min) - self.target_pop)) / self.target_pop * 100  # compute new pop imbalance
-                        I = self.pop_imbalance - imb_new
+                        imb_new = (abs(max(t, P_max) - self.target_pop) + abs(min(s, P_min) - self.target_pop)) / self.target_pop * 100  # compute new pop deviation
+                        I = 3*self.pop_deviation - imb_new
                         if I < 0:
                             if self.anneal < 1e-7:
                                 if I < -0.01:
@@ -332,19 +339,14 @@ order by
                         self.nodes_df.loc[comp[0], self.district_type] = d0
                         self.nodes_df.loc[comp[1], self.district_type] = d1
                         
-#                         if self.pop_imbalance < 1000:
-#                             intersect_defect_old = self.intersect_defect
-#                             whole_defect_old = self._districts_defect
-#                             self.get_splits()
-#                             I = (intersect_defect_old - self.intersect_defect) + (whole_defect_old - self.whole_defect)
-#                             I = (self.whole_defect_init - self.whole_defect) + (self.intersect_defect_init - self.intersect_defect)
-#                             I = self.defect_init - self.defect
-#                             if I < 0:
-#                                 T.add_edge(*e)
-#                                 self.nodes_df[self.district_type] = self.nodes_df['old']
-#                                 self.get_splits()
-#                                 continue
-                            
+                        if self.pop_deviation < self.defect_valid_activate:
+                            self.get_splits()
+                            I = self.defect_init - self.defect
+                            if I < 0:
+                                T.add_edge(*e)
+                                self.nodes_df[self.district_type] = self.nodes_df['old']
+                                self.get_splits()
+                                continue
                             
 
                         # We found a good cut edge & made 2 new districts.  They will be label with the values of d0 & d1.
@@ -370,7 +372,7 @@ order by
                             
                         # update stats
                         self.get_stats()
-                        assert abs(self.pop_imbalance - imb_new) < 1e-2, f'disagreement betwen pop_imbalance calculations {self.pop_imbalance} v {imb}'
+                        assert abs(self.pop_deviation - imb_new) < 1e-2, f'disagreement betwen pop_deviation calculations {self.pop_deviation} v {imb}'
                         if self.hash in self.hash_rec: # if we've already seen that plan before, reject and keep trying for a new one
 #                             rpt(f'duplicate plan {self.hash}')
                             T.add_edge(*e)
@@ -379,5 +381,194 @@ order by
                                 self.graph.nodes[n][self.district_type] = H.nodes[n][self.district_type]
                             self.get_stats()
                         else:  # if this is a never-before-seen plan, keep it and return happy
-#                             rpt(f'recombed {self.district_type} {d0} & {d1} got pop_imbalance={self.pop_imbalance:.2f}%')
+#                             rpt(f'recombed {self.district_type} {d0} & {d1} got pop_deviation={self.pop_deviation:.2f}%')
                             return True
+
+
+
+
+    def post_process(self):
+        self.tbl = f'{self.results_ds}.{self.results_stem}_0000000_allresults'
+        u = '\nunion all\n'
+        self.tbls = dict()
+        for src_tbl in bqclient.list_tables(self.results_ds, max_results=self.max_results):
+            full  = src_tbl.full_table_id.replace(':', '.')
+            short = src_tbl.table_id
+            random_seed = short.split('_')[-2]
+            key  = short.split('_')[-1]
+            if random_seed.isnumeric():
+                try:
+                    self.tbls[random_seed][key] = full
+                except:
+                    self.tbls[random_seed] = {key : full}
+
+        self.tbls = {random_seed : tbls for random_seed, tbls in self.tbls.items() if len(tbls)>=3}
+        self.cols = [c for c in get_cols(self.nodes_tbl) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+        
+        def run_batches(query_list, batch_size=self.batch_size, tbl=self.tbl, run=True):
+            temp_tbls = list()
+            k = 0
+            while query_list:
+                query = query_list.pop()
+                try:
+                    query_stack = query_stack + u + query
+                except:
+                    query_stack = query
+                    
+                if len(query_list) % batch_size == 0:
+                    temp_tbls.append(f'{tbl}_{k}')
+                    if run:
+                        load_table(tbl=temp_tbls[-1], query=query_stack)
+                    print(f'{len(query_list)} remain')
+                    del query_stack
+                    k += 1
+            return temp_tbls
+
+
+        
+        print('stacking hashes into batches')
+        self.hash_query_list = [f"""
+select
+    cast(random_seed as int) as random_seed,
+    cast(plan as int) as plan,
+    cast(A.hash as int) as hash_plan
+from
+    {tbls["summaries"]} as A""" for random_seed, tbls in self.tbls.items()]
+        self.hash_tbl = f'{self.tbl}_hash'
+        self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=False)
+
+
+        
+        print('stacking hash batches')
+        self.hash_batch_stack = u.join([f'select * from {tbl}' for tbl in self.hash_temp_tbls])
+        self.hash_batch_stack = f"""
+select
+    *
+from (
+    select
+        *,
+        row_number() over (partition by hash_plan order by plan asc, random_seed asc) as r
+    from (
+        {subquery(self.hash_batch_stack, indents=1)}
+        )
+    )
+where
+    r = 1
+"""
+#         load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
+
+
+
+        print('joining tables in batches')
+        self.join_query_list = [f"""
+select
+    A.random_seed,
+    A.plan,
+    A.{self.district_type},
+    A.geoid,
+    C.hash_plan,
+    C.whole_defect_plan,
+    C.intersect_defect_plan,
+    C.defect_plan,
+    C.pop_imbalance_plan,
+    --C.pop_deviation_plan,
+    --B.pop_deviation_district,
+    C.polsby_popper_plan,
+    B.polsby_popper_district,
+    B.aland,
+    B.total_pop,
+from (
+    select
+        cast(random_seed as int) as random_seed,
+        cast(plan as int) as plan,
+        cast({self.district_type} as int) as {self.district_type},
+        geoid,
+    from
+        {tbls['plans']}
+    ) as A
+inner join (
+    select
+        cast(random_seed as int) as random_seed,
+        cast(plan as int) as plan,
+        cast({self.district_type} as int) as {self.district_type},
+        aland,
+        --pop_deviation as pop_deviation_district,
+        polsby_popper as polsby_popper_district,
+        total_pop
+    from
+        {tbls['stats']}
+    ) as B
+on
+    A.random_seed = B.random_seed and A.plan = B.plan and A.{self.district_type} = B.{self.district_type}
+inner join (
+    select
+        X.*,
+        Y.hash_plan
+    from (
+        select
+            cast(random_seed as int) as random_seed,
+            cast(plan as int) as plan,
+            --pop_deviation as pop_deviation_plan,
+            pop_imbalance as pop_imbalance_plan,
+            whole_defect as whole_defect_plan,
+            intersect_defect as intersect_defect_plan,
+            defect as defect_plan,
+            polsby_popper as polsby_popper_plan
+        from
+            {tbls['summaries']}
+        where
+            --pop_deviation < {self.pop_deviation_thresh}
+            pop_imbalance < {self.pop_deviation_thresh}
+        ) as X
+    inner join
+        {self.hash_tbl} as Y
+    on
+        X.random_seed = Y.random_seed and X.plan = Y.plan
+    ) as C
+on
+    B.random_seed = C.random_seed and B.plan = C.plan
+""" for random_seed, tbls in self.tbls.items()]
+        self.join_tbl = f'{self.tbl}_join'
+        self.join_temp_tbls = run_batches(self.join_query_list, tbl=self.join_tbl, run=False)
+
+
+
+        print('stacking joined table batches')
+        self.join_batch_stack = u.join([f'select * from {tbl}' for tbl in self.join_temp_tbls])
+        self.stack_tbl = f'{self.tbl}_stack'
+#         load_table(tbl=self.stack_tbl, query=self.join_batch_stack)
+
+
+
+        print('joining and aggregating data')
+        self.final_query = f"""
+select
+    A.random_seed,
+    A.plan,
+    A.{self.district_type},
+    max(A.hash_plan) as hash_plan,
+    --max(A.pop_deviation_plan) as pop_deviation_plan,
+    max(A.pop_imbalance_plan) as pop_imbalance_plan,
+    max(nodes_plan) as nodes_plan,
+    count(*) as nodes_district,
+    max(A.polsby_popper_plan) as polsby_popper_plan,
+    max(A.polsby_popper_district) as polsby_popper_district,
+    max(A.aland) as aland,
+    max(A.total_pop) as total_pop,
+    case when max(A.aland) > 0 then max(A.total_pop) / max(A.aland) else 0 end as density,
+    {join_str(1).join([f'sum(B.{c}) as {c}' for c in self.cols])}
+from (
+    select
+        *,
+        count(*) over (partition by random_seed, plan) as nodes_plan
+    from
+        {self.stack_tbl}
+    ) as A
+inner join
+    {self.nodes_tbl} as B
+on
+    A.geoid = B.geoid
+group by
+    random_seed, plan, {self.district_type}
+"""
+        load_table(tbl=self.tbl, query=self.final_query)

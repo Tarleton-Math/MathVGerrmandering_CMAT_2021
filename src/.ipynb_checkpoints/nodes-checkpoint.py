@@ -177,8 +177,8 @@ from (
                 select
                     A.geoid_new,
                     B.*,
-                    sum(aland) over (partition by geoid_new, county)               as A_county,
-                    sum(aland) over (partition by geoid_new, {self.district_type}) as A_district,
+                    sum(total_pop) over (partition by geoid_new, county)               as A_county,
+                    sum(total_pop) over (partition by geoid_new, {self.district_type}) as A_district,
                 from (
                     {subquery(query_temp, 5)}
                     ) as A

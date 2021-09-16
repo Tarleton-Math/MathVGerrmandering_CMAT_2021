@@ -30,7 +30,7 @@ try:
     run_mcmc
 except:
     run_mcmc = True
-
+    
 ################# Get data & make nodes #################
 from src.nodes import *
 
@@ -38,10 +38,32 @@ nodes_opts = {
     'abbr'             : 'TX',
     'level'            : 'cntyvtd',
     'district_type'    : 'sldl',
-    'contract_thresh'  : 5,
+    'contract_thresh'  : 3,
 }
+    
+mcmc_opts = {
+    'max_steps'             : 1000000,
+    'pop_diff_exp'          : 2,
+    'pop_imbalance_target'  : 10,
+    'pop_imbalance_stop'    : 'True',
+    'defect_valid_activate' : 1000,
+    'anneal'                : 0,
+    'report_period'         : 5,
+    'save_period'           : 500,
+}
+
+run_opts = {
+    'seed_start'      : 1000000,
+    'jobs_per_worker' : 1,
+    'workers'         : 80,
+}
+
 if not skip_inputs:
     nodes_opts = get_inputs(nodes_opts)
+if not skip_inputs:
+    mcmc_opts  = get_inputs(mcmc_opts)
+if not skip_inputs:
+    run_opts = get_inputs(run_opts)
 
 nodes_opts['election_filters'] = (
     "office='President' and race='general'",
@@ -73,28 +95,23 @@ N = Nodes(**nodes_opts)
 from src.mcmc import *
 import multiprocessing
 
-mcmc_opts = {
-    'max_steps'             : 1000000,
-    'pop_diff_exp'          : 2,
-    'pop_imbalance_target'  : 10,
-    'pop_imbalance_stop'    : 'True',
-    'anneal'                : 0,
-    'report_period'         : 100,
-    'save_period'           : 500,
-}
-if not skip_inputs:
-    mcmc_opts  = get_inputs(mcmc_opts)
 mcmc_opts['nodes_tbl'] = N.tbl
+    
+for opt in ['max_steps', 'pop_diff_exp', 'report_period']:
+    mcmc_opts[opt] = int(mcmc_opts[opt])
 
+for opt in ['pop_imbalance_target', 'anneal', 'defect_valid_activate']:
+    mcmc_opts[opt] = float(mcmc_opts[opt])
+    
+if mcmc_opts['pop_imbalance_stop'].lower() in yes:
+    mcmc_opts['pop_imbalance_stop'] = True
+else:
+    mcmc_opts['pop_imbalance_stop'] = False
+    
+for opt in ['seed_start', 'jobs_per_worker', 'workers']:
+    run_opts[opt] = int(run_opts[opt])
 
-run_opts = {
-    'seed_start'      : 1000200,
-    'jobs_per_worker' : 1,
-    'workers'         : 800,
-}
-if not skip_inputs:
-    run_opts = get_inputs(run_opts)
-
+    
 
 if os.getenv('PYTHONHASHSEED') == HASHSEED:
     mcmc_opts['save'] = True
