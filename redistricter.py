@@ -34,12 +34,12 @@ except:
 ################# Get data & make nodes #################
 from src.nodes import *
 
-nodes_opts = {
-    'abbr'             : 'TX',
-    'level'            : 'cntyvtd',
-    'district_type'    : 'sldl',
-    'contract_thresh'  : 0,
-}
+# nodes_opts = {
+#     'abbr'             : 'TX',
+#     'level'            : 'cntyvtd',
+#     'district_type'    : 'sldl',
+#     'contract_thresh'  : 0,
+# }
 if not skip_inputs:
     nodes_opts = get_inputs(nodes_opts)
 
@@ -63,7 +63,7 @@ nodes_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-#     'nodes'
+    'nodes'
 )
 
 N = Nodes(**nodes_opts)
@@ -79,8 +79,8 @@ mcmc_opts = {
     'pop_imbalance_target'  : 0.1,
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
-    'report_period'         : 1,#00,
-    'save_period'           : 1,#500,
+    'report_period'         : 100,
+    'save_period'           : 500,
 }
 if not skip_inputs:
     mcmc_opts  = get_inputs(mcmc_opts)
@@ -106,8 +106,7 @@ else:
 
 def f(random_seed):
     M = MCMC(random_seed=random_seed, **mcmc_opts)
-    if run_mcmc:
-        M.run_chain()
+    M.run_chain()
     return M
     
 def multi_f(random_seed):
@@ -119,14 +118,15 @@ a = run_opts['seed_start']
 b = a + run_opts['jobs_per_worker'] * run_opts['workers']
 random_seeds = np.arange(a, b)
 
-start_time = time.time()
-if run_opts['workers'] == 1:
-    for s in random_seeds:
-        M = f(s)
-else:
-    with multiprocessing.Pool(run_opts['workers']) as pool:
-        M = pool.map(multi_f, random_seeds)
-print(f'total time elapsed = {time_formatter(time.time() - start_time)}')
+if run_mcmc:
+    start_time = time.time()
+    if run_opts['workers'] == 1:
+        for s in random_seeds:
+            M = f(s)
+    else:
+        with multiprocessing.Pool(run_opts['workers']) as pool:
+            M = pool.map(multi_f, random_seeds)
+    print(f'total time elapsed = {time_formatter(time.time() - start_time)}')
 
 ################# Post-Processing & Analysis #################
 
@@ -139,4 +139,4 @@ print(f'total time elapsed = {time_formatter(time.time() - start_time)}')
 # A.compute_results()
 # print(f'analysis took {time_formatter(time.time() - start)}')
 
-print(f'total time elapsed = {time_formatter(time.time() - start_time)}')
+# print(f'total time elapsed = {time_formatter(time.time() - start_time)}')

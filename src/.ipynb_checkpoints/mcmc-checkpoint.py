@@ -136,10 +136,6 @@ order by
         return tuple(sorted(tuple((min(u,v), max(u,v)) for u, v in G.edges)))
     
 
-#     def sum_nodes(self, G, attr='total_pop'):
-#         return sum(x for n, x in G.nodes(data=attr))
-
-
     def get_stats(self):
         self.get_districts()
         self.stats = pd.DataFrame()
@@ -217,14 +213,12 @@ order by
                 self.stats_rec    .append(self.get_stats())
                 self.summaries_rec.append(self.get_summaries())
                 self.hash_rec     .append(self.hash)
-#                 print('success')
                 if self.plan % self.report_period == 0:
                     self.report()
                 if self.plan % self.save_period == 0:
                     self.save_results()
                 if self.pop_imbalance_stop:
                     if self.pop_imbalance < self.pop_imbalance_target:
-#                         rpt(f'pop_imbalance_target {self.pop_imbalance_target} satisfied - stopping')
                         break
             else:
                 rpt(msg)
@@ -253,10 +247,6 @@ order by
 
             for nm, tbl in tbls.items():
                 saved = False
-                
-                load_table(tbl=tbl, df=reorder(self[nm]), overwrite=self.overwrite_tbl)
-
-                
                 for i in range(1, 60):
                     try:
                         load_table(tbl=tbl, df=reorder(self[nm]), overwrite=self.overwrite_tbl)
