@@ -25,13 +25,14 @@ class MCMC(Base):
 
         ds = f'{root_bq}.{self.results_stem}'
         self.results_bq = ds + f'.{self.results_name}'
-        self.results_pq = root_path / f'results/{self.results_stem}/{self.results_name}.parquet'
+        self.results_path = root_path / f'results/{self.results_stem}'
+        self.results_pq = self.results_path / f'{self.results_name}.parquet'
        
         try:
             bqclient.create_dataset(ds)
         except:
             pass
-        self.results_pq.mkdir(parents=True, exist_ok=True)
+        self.results_path.mkdir(parents=True, exist_ok=True)
         
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
@@ -64,15 +65,7 @@ class MCMC(Base):
         self.target_pop = self.total_pop / Seats[self.district_type]
         nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
         
-        
-        
-        
-#         self.nodes_df['target'] = self.nodes_df.groupby('county')['total_pop'].transform('sum') / self.pop_ideal
-#         self.nodes_df['whole_districts_target'] = np.floor(self.nodes_df['target']).astype(int)
-#         self.nodes_df['county_parts_target'] = np.ceil(self.nodes_df['target']).astype(int)
         self.get_splits()
-#         self.whole_districts_imbalance_init = self.whole_districts_imbalance
-#         self.county_parts_imbalance_init = self.county_parts_imbalance
         self.defect_init = self.defect
         self.report()
         
@@ -174,8 +167,8 @@ order by
         self.summaries['hash'] = [self.hash]
         self.summaries['polsby_popper']  = [self.stats['polsby_popper'].mean()]
         self.summaries['pop_imbalance'] = [self.pop_imbalance]
-        self.summaries['intersections_defect'] = [self.intersections_defect]
-        self.summaries['whole_districts_defect'] = [self.whole_districts_defect]
+        self.summaries['intersect_defect'] = [self.intersect_defect]
+        self.summaries['whole_defect'] = [self.whole_defect]
         self.summaries['defect'] = [self.defect]
         return self.summaries
 
@@ -184,34 +177,27 @@ order by
         self.splits = self.nodes_df[['county', self.district_type, self.seats_col]].drop_duplicates()
         self.splits['random_seed'] = self.random_seed
         self.splits['plan'] = self.plan
-        self.splits['intersections'] = self.splits.groupby('county')[self.district_type].transform('count')
+
+        self.splits = self.splits.groupby(['county', self.district_type])[self.seats_col].sum().reset_index()
         self.splits['whole'] = self.splits.groupby(self.district_type)['county'].transform('count') <= 1
-        self.splits['whole_districts'] = self.splits.groupby('county')['whole'].transform('sum')
-        self.splits = self.splits.drop(columns=[self.district_type, 'whole']).drop_duplicates()
-        self.intersections_defect   = (np.ceil (self.splits[self.seats_col]) - self.splits['intersections']).abs().sum().astype(int)
-        self.whole_districts_defect = (np.floor(self.splits[self.seats_col]) - self.splits['whole_districts']).abs().sum().astype(int)
-        self.defect = self.intersections_defect + self.whole_districts_defect
-        
-#         self.splits = self.nodes_df[['random_seed', 'plan', 'county', self.district_type, 'county_parts_target', 'whole_districts_target']].drop_duplicates()
-#         self.splits['plan'] = self.plan
-#         self.splits['county_parts'] = self.splits.groupby('county')[self.district_type].transform('count')
-#         self.splits['whole_district'] = self.splits.groupby(self.district_type)['county'].transform('count') <= 1
-#         self.splits['whole_districts'] = self.splits.groupby('county')['whole_district'].transform('sum')
-#         self.splits = self.splits.drop(columns=[self.district_type, 'whole_district']).drop_duplicates()
-        
-#         self.county_parts_imbalance = (self.splits['county_parts_target'] - self.splits['county_parts']).abs().sum()
-#         self.whole_districts_imbalance = (self.splits['whole_districts_target'] - self.splits['whole_districts']).abs().sum()
-#         self.defect = self.county_parts_imbalance + self.whole_districts_imbalance
+        self.splits = self.splits.groupby('county').agg(whole=('whole', 'sum'), intersect=('whole', 'count'), target=(self.seats_col, 'sum'))
+        self.splits['whole_defect'] = (np.floor(self.splits['target']) - self.splits['whole']).abs().astype(int)
+        self.splits['intersect_defect'] = (np.ceil(self.splits['target']) - self.splits['intersect']).abs().astype(int)
+        self.splits['defect'] = self.splits['whole_defect'] + self.splits['intersect_defect']
+        self.intersect_defect = self.splits['intersect_defect'].sum()
+        self.whole_defect = self.splits['whole_defect'].sum()
+        self.defect = self.splits['defect'].sum()
         return self.splits
 
 
     def report(self):
         self.get_splits()
         self.get_stats()
-        print(f'\nrandom_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_imbal={self.pop_imbalance:.1f}, intersections_defect={self.intersections_defect}, whole_districts_defect={self.whole_districts_defect}', flush=True)
+        print(f'\nrandom_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_imbal={self.pop_imbalance:.1f}, intersect_defect={self.intersect_defect}, whole_defect={self.whole_defect}', flush=True)
 
         
     def run_chain(self):
+        self.overwrite_tbl = True
         self.plan = 0
         self.nodes_df['plan'] = self.plan
         self.get_stats()
@@ -267,16 +253,20 @@ order by
 
             for nm, tbl in tbls.items():
                 saved = False
+                
+                load_table(tbl=tbl, df=reorder(self[nm]), overwrite=self.overwrite_tbl)
+
+                
                 for i in range(1, 60):
                     try:
-                        load_table(tbl=tbl, df=reorder(self[nm]), overwrite=self.overite_tbl)
+                        load_table(tbl=tbl, df=reorder(self[nm]), overwrite=self.overwrite_tbl)
                         self[nm] = list()
                         saved = True
                         break
                     except:
                         time.sleep(1)
                 assert saved, f'I tried to write the result of random_seed {self.random_seed} {i} times without success - giving up'
-            self.overite_tbl = False
+            self.overwrite_tbl = False
 
 
     def recomb(self):
@@ -353,11 +343,11 @@ order by
                         self.nodes_df.loc[comp[1], self.district_type] = d1
                         
 #                         if self.pop_imbalance < 1000:
-#                             intersections_defect_old = self.intersections_defect
-#                             whole_districts_defect_old = self.whole_districts_defect
+#                             intersect_defect_old = self.intersect_defect
+#                             whole_defect_old = self._districts_defect
 #                             self.get_splits()
-#                             I = (intersections_defect_old - self.intersections_defect) + (whole_districts_imbalance_old - self.whole_districts_defect)
-#                             I = (self.whole_districts_defect_init - self.whole_districts_defect) + (self.intersections_defect_init - self.intersections_defect)
+#                             I = (intersect_defect_old - self.intersect_defect) + (whole_defect_old - self.whole_defect)
+#                             I = (self.whole_defect_init - self.whole_defect) + (self.intersect_defect_init - self.intersect_defect)
 #                             I = self.defect_init - self.defect
 #                             if I < 0:
 #                                 T.add_edge(*e)

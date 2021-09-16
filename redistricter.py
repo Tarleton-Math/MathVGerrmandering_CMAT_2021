@@ -63,7 +63,7 @@ nodes_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-    'nodes'
+#     'nodes'
 )
 
 N = Nodes(**nodes_opts)
@@ -79,8 +79,8 @@ mcmc_opts = {
     'pop_imbalance_target'  : 0.1,
     'pop_imbalance_stop'    : 'True',
     'anneal'                : 0,
-    'report_period'         : 100,
-    'save_period'           : 500,
+    'report_period'         : 1,#00,
+    'save_period'           : 1,#500,
 }
 if not skip_inputs:
     mcmc_opts  = get_inputs(mcmc_opts)
@@ -89,7 +89,7 @@ mcmc_opts['nodes_tbl'] = N.tbl
 
 run_opts = {
     'seed_start'      : 1000000,
-    'jobs_per_worker' : 5,
+    'jobs_per_worker' : 1,
     'workers'         : 1,
 }
 if not skip_inputs:
