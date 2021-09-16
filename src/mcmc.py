@@ -58,11 +58,11 @@ class MCMC(Base):
                 rpt('fail')
                 self.nodes_df.loc[n, self.district_type] = D
 
-        
         self.plan = 0
         self.get_districts()
         self.total_pop  = self.nodes_df['total_pop'].sum()
         self.target_pop = self.total_pop / Seats[self.district_type]
+        nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
         
         
         
@@ -117,8 +117,7 @@ order by
 """
         self.edges = run_query(query)
         self.graph = self.edges_to_graph(self.edges)
-        nx.set_node_attributes(self.graph, self.nodes_df[listify(self.node_attrs)].to_dict('index'))
-#         nx.set_node_attributes(self.graph, self.nodes_df.drop(columns=self.district_type).to_dict('index'))
+
         
         print(f'connecting districts')
         for D in np.unique(self.nodes_df[self.district_type]):
@@ -189,8 +188,8 @@ order by
         self.splits['whole'] = self.splits.groupby(self.district_type)['county'].transform('count') <= 1
         self.splits['whole_districts'] = self.splits.groupby('county')['whole'].transform('sum')
         self.splits = self.splits.drop(columns=[self.district_type, 'whole']).drop_duplicates()
-        self.intersections_defect = (np.ceil(self.splits[self.seats_col]) - self.splits['intersections']).abs().sum()
-        self.whole_districts_defect = (np.floor(self.splits[self.seats_col]) - self.splits['whole_districts']).abs().sum()
+        self.intersections_defect = (np.ceil(self.splits[self.seats_col]) - self.splits['intersections']).abs().sum().astype(int)
+        self.whole_districts_defect = (np.floor(self.splits[self.seats_col]) - self.splits['whole_districts']).abs().sum().astype(int)
         self.defect = self.intersections_defect + self.whole_districts_defect
         
 #         self.splits = self.nodes_df[['random_seed', 'plan', 'county', self.district_type, 'county_parts_target', 'whole_districts_target']].drop_duplicates()
@@ -209,7 +208,7 @@ order by
     def report(self):
         self.get_splits()
         self.get_stats()
-        print(f'random_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_imbal={self.pop_imbalance:.1f}, intersections_defect={self.intersections_defect}, whole_districts_defect={self.whole_districts_defect}', flush=True)
+        print(f'\nrandom_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_imbal={self.pop_imbalance:.1f}, intersections_defect={self.intersections_defect}, whole_districts_defect={self.whole_districts_defect}', flush=True)
 
         
     def run_chain(self):
