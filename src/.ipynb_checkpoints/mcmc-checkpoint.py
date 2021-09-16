@@ -31,7 +31,8 @@ class MCMC(Base):
         self.bq = self.ds + f'.{self.name}'
         self.path = root_path / f'results/{self.stem}'
         self.pq = self.path / f'{self.name}.parquet'
-        self.gpickle = self.pq.with_suffix('.gpickle')   
+        self.gpickle = self.pq.with_suffix('.gpickle')
+        self.tbl = f'{self.ds}.{self.stem}_0000000_allresults'
     
         try:
             bqclient.create_dataset(self.ds)
@@ -235,7 +236,7 @@ order by
 
         tbls = {f'{nm}_rec': f'{self.bq}_{nm}' for nm in ['plans', 'splits', 'stats', 'summaries']}
         if len(self.plans_rec) > 0:
-            self.plans_rec     = pd.concat(self.plans_rec     , axis=0).rename_axis('geoid').reset_index()
+            self.plans_rec     = pd.concat(self.plans_rec    , axis=0).rename_axis('geoid').reset_index()
             self.splits_rec    = pd.concat(self.splits_rec   , axis=0).rename_axis('geoid').reset_index()
             self.stats_rec     = pd.concat(self.stats_rec    , axis=0).rename_axis(self.district_type).reset_index()
             self.summaries_rec = pd.concat(self.summaries_rec, axis=0)
@@ -381,7 +382,6 @@ order by
 
 
     def post_process(self):
-        self.tbl = f'{self.ds}.{self.stem}_0000000_allresults'
         u = '\nunion all\n'
         self.tbls = dict()
         for src_tbl in bqclient.list_tables(self.ds, max_results=self.max_results):
