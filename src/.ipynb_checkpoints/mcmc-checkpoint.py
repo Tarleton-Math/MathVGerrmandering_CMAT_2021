@@ -34,6 +34,7 @@ class MCMC(Base):
         self.pq = self.path / f'{self.name}.parquet'
         self.gpickle = self.pq.with_suffix('.gpickle')
         self.tbl = f'{self.ds}.{self.stem}_0000000_allresults'
+        self.algorithm_description = f'contract_thres
     
         try:
             bqclient.create_dataset(self.ds)
@@ -231,7 +232,7 @@ order by
 
     def save_results(self):
         nx.write_gpickle(self.graph, self.gpickle)
-        to_gcs(self.graph_file)
+        to_gcs(self.gpickle)
         
         def reorder(df):
             idx = [c for c in ['random_seed', 'plan'] if c in df.columns]

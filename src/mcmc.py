@@ -232,7 +232,7 @@ order by
 
     def save_results(self):
         nx.write_gpickle(self.graph, self.gpickle)
-        to_gcs(self.graph_file)
+        to_gcs(self.gpickle)
         
         def reorder(df):
             idx = [c for c in ['random_seed', 'plan'] if c in df.columns]
