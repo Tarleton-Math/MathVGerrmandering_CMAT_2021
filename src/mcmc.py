@@ -226,7 +226,6 @@ order by
 
 
     def save_results(self):
-        self.path.mkdir(parents=True, exist_ok=True)
         nx.write_gpickle(self.graph, self.gpickle)
         to_gcs(self.graph_file)
         
