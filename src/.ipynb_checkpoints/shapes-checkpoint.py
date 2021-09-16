@@ -40,7 +40,8 @@ class Shapes(Variable):
             df = lower(gpd.read_file(self.path, rows=slice(a, a+chunk_size)))
             df.columns = [x[:-2] if x[-2:].isnumeric() else x for x in df.columns]
             df = df[['geoid', 'aland', 'geometry']]
-            df['geometry'] = df['geometry'].buffer(1).apply(lambda p: orient(p, -1))
+            # convert to https://spatialreference.org/ref/esri/usa-contiguous-albers-equal-area-conic/ to buffer
+            df['geometry'] = df['geometry'].to_crs(crs_area).buffer(5).apply(lambda p: orient(p, -1)).to_crs(crs_census)
             load_table(self.raw, df=df.to_wkb(), overwrite=a==0)
             if df.shape[0] < chunk_size:
                 break
@@ -62,4 +63,4 @@ order by
     geoid
 """
         load_table(self.tbl, query=query, preview_rows=0)
-        self.save_tbl()
+#         self.save_tbl()

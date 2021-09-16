@@ -36,6 +36,11 @@ Seats = {'cd':38, 'sldu':31, 'sldl':150}
 Years = [2010, 2020]
 concat_str = ' ... '
 meters_per_mile = 1609.344
+# https://gis.stackexchange.com/questions/27702/what-is-the-srid-of-census-gov-shapefiles
+# crs_census = 'NAD83'
+crs_census = 'EPSG:4269'
+crs_area   = 'ESRI:102003'
+crs_length = 'ESRI:102005'
 
 def to_gcs(file):
     gcs_bucket.blob(str(file).replace(str(root_path)+'/', '')).upload_from_filename(file)
@@ -74,11 +79,11 @@ def lower(df):
 def listify(x):
     if x is None:
         return []
-    if isinstance(x, pd.core.frame.DataFrame):
+    elif isinstance(x, pd.core.frame.DataFrame):
         x = x.to_dict('split')['data']
-    if isinstance(x, (np.ndarray, pd.Series)):
+    elif isinstance(x, (np.ndarray, pd.Series)):
         x = x.tolist()
-    if isinstance(x, (list, tuple, set)):
+    elif isinstance(x, (list, tuple, set)):
         return list(x)
     else:
         return [x]
@@ -171,9 +176,6 @@ where
 """
     return lower_cols(run_query(query)).set_index('name')
 
-def get_components(graph):
-    return sorted([tuple(x) for x in nx.connected_components(graph)], key=lambda x:len(x), reverse=True)
-
 try:
     states
 except:
@@ -219,12 +221,12 @@ class Variable(Base):
         self.df = read_table(tbl=self.tbl)
         rpt('to parquet')
         self.df.to_parquet(self.pq)
-        rpt('to csv')
-        self.csv = self.pq.with_suffix('.csv')
-        self.df.to_csv(self.csv)
+#         rpt('to csv')
+#         self.csv = self.pq.with_suffix('.csv')
+#         self.df.to_csv(self.csv)
         rpt('to gcs')
         to_gcs(self.pq)
-        to_gcs(self.csv)
+#         to_gcs(self.csv)
         
     def get_zip(self):
         try:

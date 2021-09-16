@@ -24,6 +24,7 @@ class Nodes(Variable):
 
 
     def __post_init__(self):
+        self.n = self
         check_level(self.level)
         check_district_type(self.district_type)
         check_year(self.census_yr)
@@ -33,18 +34,14 @@ class Nodes(Variable):
         self.__dict__.update(self.state)
         self.yr = self.census_yr
         
-        self.refresh_all = set(self.refresh_all)
-        self.refresh_tbl = set(self.refresh_tbl).union(self.refresh_all)
-        if self.name in self.refresh_tbl:
-            self.refresh_all.add(self.name)
-        self.n = self
+        self.refresh_all = listify(self.refresh_all)
+        self.refresh_tbl = listify(self.refresh_tbl) + self.refresh_all
+        if len(self.refresh_tbl) > 0:
+            self.refresh_tbl.append(self.name)
         super().__post_init__()
 
 
     def get(self):
-        s = set(self.refresh_tbl).union(self.refresh_all).difference(('nodes', 'graph'))
-        if len(s) > 0:
-            self.refresh_all = listify(self.refresh_all) + ['nodes', 'graph']
         self.crosswalks    = Crosswalks(n=self)
         self.assignments   = Assignments(n=self)
         self.shapes        = Shapes(n=self)
@@ -62,6 +59,7 @@ class Nodes(Variable):
                      'census'     : ['total_pop_prop', 'seats_cd', 'seats_sldu', 'seats_sldl'] + Census_columns['data'],
                      'elections'  : [c for c in get_cols(self.elections.tbl) if c not in ['geoid', 'county']]
                     }
+
         exists = super().get()
         if not exists['tbl']:
             if not exists['raw']:

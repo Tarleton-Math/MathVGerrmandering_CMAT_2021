@@ -26,14 +26,19 @@ except:
     except:
         skip_inputs = False
         
+try:
+    run_mcmc
+except:
+    run_mcmc = True
+
 ################# Get data & make nodes #################
 from src.nodes import *
 
 nodes_opts = {
     'abbr'             : 'TX',
-    'level'            : 'bg',
+    'level'            : 'cntyvtd',
     'district_type'    : 'cd',
-    'contract_thresh'  : 0,
+    'contract_thresh'  : 10,
 }
 if not skip_inputs:
     nodes_opts = get_inputs(nodes_opts)
@@ -50,8 +55,7 @@ nodes_opts['refresh_all'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-#     'nodes',
-#     'graph',
+#     'nodes'
 )
 nodes_opts['refresh_tbl'] = (
 #     'crosswalks',
@@ -59,8 +63,7 @@ nodes_opts['refresh_tbl'] = (
 #     'shapes',
 #     'census',
 #     'elections',
-#     'nodes',
-#     'graph',
+#     'nodes'
 )
 
 N = Nodes(**nodes_opts)
@@ -103,7 +106,8 @@ else:
 
 def f(random_seed):
     M = MCMC(random_seed=random_seed, **mcmc_opts)
-    M.run_chain()
+    if run_mcmc:
+        M.run_chain()
     return M
     
 def multi_f(random_seed):
