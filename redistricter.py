@@ -49,13 +49,13 @@ mcmc_opts = {
     'anneal'                : 0,
     'pop_deviation_target'  : 0.01,
     'pop_deviation_stop'    : 'True',
-    'report_period'         : 50,
+    'report_period'         : 100,
     'save_period'           : 500,
 }
 
 run_opts = {
     'seed_start'      : 1000000,
-    'jobs_per_worker' : 1,
+    'jobs_per_worker' : 5,
     'workers'         : 80,
 }
 

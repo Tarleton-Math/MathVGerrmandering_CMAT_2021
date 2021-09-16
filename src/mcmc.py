@@ -34,7 +34,7 @@ class MCMC(Base):
         self.pq = self.path / f'{self.name}.parquet'
         self.gpickle = self.pq.with_suffix('.gpickle')
         self.tbl = f'{self.ds}.{self.stem}_0000000_allresults'
-        self.algorithm_description = f'contract_thres
+#         self.algorithm_description = f'contract_thres
     
         try:
             bqclient.create_dataset(self.ds)
@@ -98,16 +98,16 @@ order by
         self.edges = run_query(query)
         self.graph = self.edges_to_graph(self.edges)
         
-        print(f'connecting districts')
+#         print(f'connecting districts')
         for D in np.unique(self.nodes_df[self.district_type]):
             while True:
                 comp = self.get_components_district(D)
-                rpt(f"District {self.district_type} {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}")
+#                 rpt(f"District {self.district_type} {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}")
                 if len(comp) == 1:
-                    print('connected')
+#                     print('connected')
                     break
                 else:
-                    print('regrouping to connect components')
+#                     print('regrouping to connect components')
                     self.comp = comp
                     for c in comp[1:]:
                         for x in c:
