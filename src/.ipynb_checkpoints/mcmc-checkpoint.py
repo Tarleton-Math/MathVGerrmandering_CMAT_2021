@@ -43,35 +43,32 @@ class MCMC(Base):
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
         self.seats_col = f'seats_{self.district_type}'
-        self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.district_type, self.seats_col] + list(self.node_attrs)).set_index('geoid')
+        self.node_attrs = listify(self.node_attrs) + [self.district_type]
+        self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.seats_col] + list(self.node_attrs)).set_index('geoid')
         self.nodes_df['random_seed'] = self.random_seed
         
-        self.plan = 0
-        self.get_districts()
+        self.step = 0
         self.total_pop  = self.nodes_df['total_pop'].sum()
         self.target_pop = self.total_pop / Seats[self.district_type]
-        self.get_splits()
+        
+        grp = self.nodes_df.groupby('county')
+        self.counties = {k:{'nodes':tuple(sorted(v.index)),
+                            'total_pop'       :              v['total_pop'].sum(),
+                            'seats_share'     :              v[self.seats_col].sum(),
+                            'whole_target'    : int(np.floor(v[self.seats_col].sum())),
+                            'intersect_target': int(np.ceil (v[self.seats_col].sum())),
+                            } for k,v in grp}
+        
+        self.get_graph()
+        self.get_stats()
+        self.get_plan()
+
+        self.get_defect()
         self.defect_init = self.defect
         self.defect_cap = int(self.defect_multiplier * self.defect_init)
         print(f'defect_init = {self.defect_init}, setting ceiling for mcmc of {self.defect_cap}')
 
         
-    def get_districts(self):
-        grp = self.nodes_df.groupby(self.district_type)
-        self.districts = {k:tuple(sorted(v)) for k,v in grp.groups.items()}
-        self.partition = tuple(sorted(self.districts.values()))
-        self.hash = self.partition.__hash__()
-        
-    def edges_to_graph(self, edges):
-        return nx.from_pandas_edgelist(edges, source=f'geoid_x', target=f'geoid_y', edge_attr=self.edge_attrs)
-    
-    def get_components_district(self, district):
-        H = self.graph.subgraph(self.nodes_df[self.nodes_df[self.district_type] == district].index)
-        return self.get_components(H)
-        
-    def get_components(self, H):
-        return sorted([sorted(tuple(x)) for x in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
-
     def get_graph(self):
 #         rpt(f'getting edges')
         query = f"""
@@ -96,126 +93,227 @@ order by
     geoid_x, geoid_y
 """
         self.edges = run_query(query)
-        self.graph = self.edges_to_graph(self.edges)
+        self.graph = nx.from_pandas_edgelist(self.edges, source=f'geoid_x', target=f'geoid_y', edge_attr=self.edge_attrs)
+        nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
+        grp = self.nodes_df.groupby(self.district_type)
+        self.districts = {k:{'nodes':tuple(sorted(v))} for k,v in grp.groups.items()}
         
+        new_districts = Seats[self.district_type] - len(self.districts)
+        new_district_starts = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
+        del self.nodes_df
+
+        self.get_districts()        
 #         print(f'connecting districts')
-        for D in np.unique(self.nodes_df[self.district_type]):
-            while True:
-                comp = self.get_components_district(D)
+        connected = False
+        while not connected:
+            connected = True
+            for d, data in self.districts.items():
+                comp = self.get_components_district(d)
 #                 rpt(f"District {self.district_type} {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}")
-                if len(comp) == 1:
-#                     print('connected')
-                    break
-                else:
+                if len(comp) > 1:
 #                     print('regrouping to connect components')
-                    self.comp = comp
+                    connected = False
                     for c in comp[1:]:
                         for x in c:
                             y = self.rng.choice(list(self.graph.neighbors(x)))
-                            self.nodes_df.loc[x, self.district_type] = self.nodes_df.loc[y, self.district_type]
+                            self.graph.nodes[x][self.district_type] = self.graph.nodes[y][self.district_type]
+        self.get_districts()
 
-        new_districts = Seats[self.district_type] - self.nodes_df[self.district_type].nunique()
-        M = int(self.nodes_df[self.district_type].max()) + 1
-        N = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
+        
+#         N = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
+        d_new = int(max(self.districts.keys())) + 1 
+        
         while new_districts > 0:
-            n = N.pop(0)
+            n = new_district_starts.pop(0)
 #             rpt(f'try to start district {M} at node {n}')
-            D = self.nodes_df.loc[n, self.district_type]
-            self.nodes_df.loc[n, self.district_type] = M
-            comp = self.get_components_district(D)
+            d_old = self.graph.nodes[n][self.district_type]
+            self.graph.nodes[n][self.district_type] = d_new
+            comp = self.get_components_district(d_old)
             if len(comp) == 1:
 #                 rpt('success')
-                M += 1
+                self.districts[d_new] = dict()            
+                d_new += 1
                 new_districts -= 1
             else:
 #                 rpt('fail')
-                self.nodes_df.loc[n, self.district_type] = D
+                self.graph.nodes[n][self.district_type] = d_old
+        self.get_districts()
+        
+        
+    def get_districts(self):
+        for d, data in self.districts.items():
+            data['nodes'] = set()
+        for n, d in self.graph.nodes(data=self.district_type):
+            self.districts[d]['nodes'].add(n)
+        for d, data in self.districts.items():
+            data['nodes'] = tuple(sorted(data['nodes']))
+        self.partition = tuple(sorted((data['nodes'] for d, data in self.districts.items())))
+        self.hash = self.partition.__hash__()
 
-        self.nodes_df['plan'] = self.plan
-        nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
+
+    def get_stats(self, return_df=False):
+        self.get_districts()
+        attrs = ['total_pop', 'aland', 'perim']
+        for d, data in self.districts.items():
+            for a in attrs:
+                data[a] = 0
+            data['external_perim'] = 0
+
+        for n, data in self.graph.nodes(data=True):
+            d = data[self.district_type]
+            for a in attrs:
+                self.districts[d][a] += data[a]
+
+        dev_max = 0
+        dev_min = 10000
+        self.polsby_popper = 0
+        for d, data in self.districts.items():
+            H = self.graph.subgraph(data['nodes'])
+            data['internal_perim'] = sum(x for a, b, x in H.edges(data='shared_perim'))
+            data['external_perim'] = data['perim'] - 2 * data['internal_perim']
+            data['polsby_popper'] = 4 * np.pi * data['aland'] / (data['external_perim']**2) * 100
+            data['pop_deviation'] = (data['total_pop'] - self.target_pop) / self.target_pop * 100
+            self.polsby_popper += data['polsby_popper']
+            dev_max = max(dev_max, data['pop_deviation'])
+            dev_min = min(dev_min, data['pop_deviation'])
+        self.pop_deviation = abs(dev_max) + abs(dev_min)
+        if return_df:
+            df = pd.DataFrame.from_dict(self.districts, orient='index').drop(columns=['nodes'])
+            df['step'] = int(self.step)
+            df['random_seed'] = int(self.random_seed)
+            return df
+            
+
+    def get_defect(self, return_df=False):
+        self.get_districts()
+        for d, data in self.districts.items():
+            data['county_intersect'] = set()
+        
+        for c, data_county in self.counties.items():
+            data_county['district_intersect'] = set()
+            for n in data_county['nodes']:
+                d = self.graph.nodes[n][self.district_type]
+                data_county['district_intersect'].add(d)
+                self.districts[d]['county_intersect'].add(c)
+        
+        self.intersect_defect = 0
+        self.whole_defect = 0
+        self.defect = 0
+        for c, data in self.counties.items():
+            data['intersect'] = 0
+            data['whole'] = 0
+            for d in data['district_intersect']:
+                data['intersect'] += 1
+                if len(self.districts[d]['county_intersect']) == 1:
+                    data['whole'] += 1
+            data['intersect_defect'] = data['intersect'] - data['intersect_target']
+            data['whole_defect']     = data['whole']     - data['whole_target']
+            data['defect'] = abs(data['intersect_defect']) + abs(data['whole_defect'])
+            self.intersect_defect += data['intersect_defect']
+            self.whole_defect += data['whole_defect']
+            self.defect += data['defect']
+        if return_df:
+            df = pd.DataFrame.from_dict(self.counties, orient='index').drop(columns=['nodes'])
+            df['step'] = int(self.step)
+            df['random_seed'] = int(self.random_seed)
+            return df
+
+    def get_plan(self):
+        P = {n:{'random_seed':self.random_seed, 'step':self.step, self.district_type:d} for n, d in self.graph.nodes(data=self.district_type)}
+        df = pd.DataFrame.from_dict(P, orient='index')
+        return df
 
                 
+            
+    
+    def get_components_district(self, district):
+        H = nx.subgraph_view(self.graph, lambda n: self.graph.nodes[n][self.district_type] == district)
+        return self.get_components(H)
+        
+    def get_components(self, H):
+        return sorted([sorted(tuple(x)) for x in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
 
-    def get_stats(self):
-        self.get_districts()
-        self.stats = pd.DataFrame()
-        for d, N in self.districts.items():
-            H = self.graph.subgraph(N)
-            s = dict()
-            s['total_pop'] =   sum(x for a,    x in H.nodes(data='total_pop')    if x is not None)
-            internal_perim = 2*sum(x for a, b, x in H.edges(data='shared_perim') if x is not None)
-            external_perim =   sum(x for a,    x in H.nodes(data='perim')        if x is not None) - internal_perim
-            s['aland']     =   sum(x for a,    x in H.nodes(data='aland')        if x is not None)
-            s['polsby_popper'] = 4 * np.pi * s['aland'] / (external_perim**2) * 100
-            for k, v in s.items():
-                self.stats.loc[d, k] = v
-        self.stats['plan'] = int(self.plan)
-        self.stats['random_seed'] = int(self.random_seed)
-        self.stats['total_pop'] = self.stats['total_pop'].astype(int)
-        self.stats['pop_deviation'] = (self.stats['total_pop'] - self.target_pop) / self.target_pop * 100
-        self.pop_deviation = abs(self.stats['pop_deviation'].max()) + abs(self.stats['pop_deviation'].min())
-        return self.stats
+#     def get_stats(self):
+#         self.get_districts()
+#         self.stats = pd.DataFrame()
+#         for d, N in self.districts.items():
+#             H = self.graph.subgraph(N)
+#             s = dict()
+#             s['total_pop'] = int(sum(x for a,    x in H.nodes(data='total_pop')    if x is not None))
+#             internal_perim =   2*sum(x for a, b, x in H.edges(data='shared_perim') if x is not None)
+#             external_perim =     sum(x for a,    x in H.nodes(data='perim')        if x is not None) - internal_perim
+#             s['aland']     =   sum(x for a,    x in H.nodes(data='aland')        if x is not None)
+#             s['polsby_popper'] = 4 * np.pi * s['aland'] / (external_perim**2) * 100
+#             for k, v in s.items():
+#                 self.stats.loc[d, k] = v
+#         self.stats['step'] = int(self.step)
+#         self.stats['random_seed'] = int(self.random_seed)
+#         self.stats['pop_deviation'] = (self.stats['total_pop'] - self.target_pop) / self.target_pop * 100
+#         self.pop_deviation = abs(self.stats['pop_deviation'].max()) + abs(self.stats['pop_deviation'].min())
+#         return self.stats
 
 
     def get_summaries(self):
-        self.get_splits()
+        self.get_stats()
+        self.get_defect()
         self.summaries = pd.DataFrame()
         self.summaries['random_seed'] = [self.random_seed]
-        self.summaries['plan'] = [self.plan]
+        self.summaries['step'] = [self.step]
         self.summaries['hash'] = [self.hash]
-        self.summaries['polsby_popper']  = [self.stats['polsby_popper'].mean()]
+        self.summaries['polsby_popper']  = [self.polsby_popper]
         self.summaries['pop_deviation'] = [self.pop_deviation]
         self.summaries['intersect_defect'] = [self.intersect_defect]
         self.summaries['whole_defect'] = [self.whole_defect]
         self.summaries['defect'] = [self.defect]
         return self.summaries
 
+    
+    
 
-    def get_splits(self):
-        self.splits = self.nodes_df[['county', self.district_type, self.seats_col]].drop_duplicates()
-        self.splits['random_seed'] = self.random_seed
-        self.splits['plan'] = self.plan
+#     def get_splits(self):
+#         self.splits = self.nodes_df[['county', self.district_type, self.seats_col]].drop_duplicates()
+#         self.splits['random_seed'] = self.random_seed
+#         self.splits['step'] = self.step
 
-        self.splits = self.splits.groupby(['county', self.district_type])[self.seats_col].sum().reset_index()
-        self.splits['whole'] = self.splits.groupby(self.district_type)['county'].transform('count') <= 1
-        self.splits = self.splits.groupby('county').agg(whole=('whole', 'sum'), intersect=('whole', 'count'), target=(self.seats_col, 'sum'))
-        self.splits['whole_defect']     = (self.splits['whole']     - np.floor(self.splits['target'])).astype(int)
-        self.splits['intersect_defect'] = (self.splits['intersect'] - np.ceil (self.splits['target'])).astype(int)
-        self.splits['defect'] = self.splits['whole_defect'].abs() + self.splits['intersect_defect'].abs()
-        self.intersect_defect = self.splits['intersect_defect'].abs().sum()
-        self.whole_defect = self.splits['whole_defect'].abs().sum()
-        self.defect = self.splits['defect'].sum()
-        return self.splits
+#         self.splits = self.splits.groupby(['county', self.district_type])[self.seats_col].sum().reset_index()
+#         self.splits['whole'] = self.splits.groupby(self.district_type)['county'].transform('count') <= 1
+#         self.splits = self.splits.groupby('county').agg(whole=('whole', 'sum'), intersect=('whole', 'count'), target=(self.seats_col, 'sum'))
+#         self.splits['whole_defect']     = (self.splits['whole']     - np.floor(self.splits['target'])).astype(int)
+#         self.splits['intersect_defect'] = (self.splits['intersect'] - np.ceil (self.splits['target'])).astype(int)
+#         self.splits['defect'] = self.splits['whole_defect'].abs() + self.splits['intersect_defect'].abs()
+#         self.intersect_defect = self.splits['intersect_defect'].abs().sum()
+#         self.whole_defect = self.splits['whole_defect'].abs().sum()
+#         self.defect = self.splits['defect'].sum()
+#         return self.splits
 
 
     def report(self):
-        self.get_splits()
+        self.get_defect()
         self.get_stats()
-        print(f'random_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_deviation={self.pop_deviation:.1f}, intersect_defect={self.intersect_defect}, whole_defect={self.whole_defect}', flush=True)
+        print(f'random_seed {self.random_seed}: step {self.step} {time_formatter(time.time() - self.start_time)}, pop_deviation={self.pop_deviation:.1f}, intersect_defect={self.intersect_defect}, whole_defect={self.whole_defect}', flush=True)
 
         
     def run_chain(self):
-        self.get_graph()
-        self.plan = 0
+        self.step = 0
         self.overwrite_tbl = True
         self.get_stats()
-        self.plans_rec     = [self.nodes_df[['random_seed', 'plan', self.district_type]]]
-        self.splits_rec    = [self.get_splits()]
-        self.stats_rec     = [self.get_stats()]
+        self.plans_rec     = [self.get_plan()]
+        self.defect_rec    = [self.get_defect(return_df=True)]
+        self.stats_rec     = [self.get_stats(return_df=True)]
         self.summaries_rec = [self.get_summaries()]
         self.hash_rec    = [self.hash]
         for k in range(1, self.max_steps+1):
-            self.plan = k
-            self.nodes_df['plan'] = self.plan
-            msg = f"random_seed {self.random_seed} plan {self.plan} pop_deviation={self.pop_deviation:.1f}"
+            self.step = k
+            self.nodes_df['step'] = self.step
+            msg = f"random_seed {self.random_seed} step {self.step} pop_deviation={self.pop_deviation:.1f}"
 
             if self.recomb():
-                self.plans_rec    .append(self.nodes_df[['random_seed', 'plan', self.district_type]])
-                self.splits_rec   .append(self.get_splits())
-                self.stats_rec    .append(self.get_stats())
+                self.plans_rec    .append(self.get_plan())
+                self.defect_rec   .append(self.get_defect(return_df=True))
+                self.stats_rec    .append(self.get_stats(return_df=True))
                 self.summaries_rec.append(self.get_summaries())
                 self.hash_rec     .append(self.hash)
-                if self.plan % self.report_period == 0:
+                if self.step % self.report_period == 0:
                     self.report()
                 if self.plan % self.save_period == 0:
                     self.save_results()
@@ -235,13 +333,13 @@ order by
         to_gcs(self.gpickle)
         
         def reorder(df):
-            idx = [c for c in ['random_seed', 'plan'] if c in df.columns]
+            idx = [c for c in ['random_seed', 'step'] if c in df.columns]
             return df[idx + [c for c in df.columns if c not in idx]]
 
-        tbls = {f'{nm}_rec': f'{self.bq}_{nm}' for nm in ['plans', 'splits', 'stats', 'summaries', 'params']}
+        tbls = {f'{nm}_rec': f'{self.bq}_{nm}' for nm in ['plans', 'defect', 'stats', 'summaries', 'params']}
         if len(self.plans_rec) > 0:
             self.plans_rec     = pd.concat(self.plans_rec    , axis=0).rename_axis('geoid').reset_index()
-            self.splits_rec    = pd.concat(self.splits_rec   , axis=0).rename_axis('geoid').reset_index()
+            self.defect_rec    = pd.concat(self.defect_rec   , axis=0).rename_axis('geoid').reset_index()
             self.stats_rec     = pd.concat(self.stats_rec    , axis=0).rename_axis(self.district_type).reset_index()
             self.summaries_rec = pd.concat(self.summaries_rec, axis=0)
             self.params_rec    = pd.DataFrame()
@@ -269,15 +367,16 @@ order by
         
 
     def recomb(self):
-        self.nodes_df['old'] = self.nodes_df[self.district_type].copy()
-        self.get_stats()
+        self.graph_old = self.graph.copy()
+        
         def gen(pop_diff):
             while len(pop_diff) > 0:
                 pop_diff /= pop_diff.sum()
                 a = self.rng.choice(pop_diff.index, p=pop_diff)
                 pop_diff.pop(a)
                 yield a
-        L = self.stats['total_pop']
+        df = self.get_districts(return_df=True)
+        L = df['total_pop']
         pop_diff = pd.DataFrame([(x, y, abs(p-q)) for x, p in L.iteritems() for y, q in L.iteritems() if x < y]).set_index([0,1]).squeeze()
         pop_diff = (pop_diff / pop_diff.sum()) ** self.pop_diff_exp
         pairs = gen(pop_diff)
@@ -289,14 +388,14 @@ order by
                 return False
             except Exception as e:
                 raise Exception(f'unknown error {e}')
-            m = list(self.districts[d0]+self.districts[d1])  # nodes in d0 or d1
+            m = list(self.districts[d0]['nodes'] + self.districts[d1]['nodes'])  # nodes in d0 or d1
             H = self.graph.subgraph(m).copy()  # subgraph on those nodes
             if not nx.is_connected(H):  # if H is not connect, go to next district pair
 #                     rpt(f'{d0},{d1} not connected')
                 continue
 #                 else:
 #                     rpt(f'{d0},{d1} connected')
-            P = self.stats['total_pop'].copy()
+            P = df['total_pop'].copy()
             p0 = P.pop(d0)
             p1 = P.pop(d1)
             q = p0 + p1
@@ -329,37 +428,63 @@ order by
                             s, t = t, s
                         pop_deviation_new = (abs(max(t, P_max) - self.target_pop) + abs(min(s, P_min) - self.target_pop)) / self.target_pop * 100  # compute new pop deviation
                         
+                        def accept(comp):
+                            for n in comp[0]:
+                                self.graph.nodes[n][self.district_type] = d0
+                            for n in comp[1]:
+                                self.graph.nodes[n][self.district_type] = d1
+                            self.get_disticts()
+                            novel = self.hash not in self.hash_rec
+                            if not novel: # if we've already seen that plan before, reject and keep trying for a new one
+#                             rpt(f'duplicate plan {self.hash}')
+                                reject(comp)
+                                self.get_disticts()
+                            return novel
+                            
+                        def reject(comp):
+                            T.add_edge(*e)
+                            for n in comp[0] + comp[1]:
+                                self.graph.nodes[n][self.district_type] = self.graph_old.nodes[n]
+                        
                         comp = self.get_components(T)
                         if self.pop_deviation > self.pop_deviation_target:
                             if pop_deviation_new > self.pop_deviation:
                                 T.add_edge(*e)
                                 continue
                             else:
-                                self.nodes_df.loc[comp[0], self.district_type] = d0
-                                self.nodes_df.loc[comp[1], self.district_type] = d1
-                                self.get_splits()
-                                if self.defect > self.defect_cap:
-                                    T.add_edge(*e)
-                                    self.nodes_df[self.district_type] = self.nodes_df['old']
-                                    self.get_splits()
-                                    self.get_stats()
-                                    continue
+                                if accept(comp):
+                                    self.get_defect()
+                                    if self.defect > self.defect_cap:
+                                        reject(comp)
+                                        self.get_defect()
+                                        continue
                         else:
                             if pop_deviation_new > self.pop_deviation_target:
                                 T.add_edge(*e)
                                 continue
                             else:
                                 defect_old = self.defect
-                                self.nodes_df.loc[comp[0], self.district_type] = d0
-                                self.nodes_df.loc[comp[1], self.district_type] = d1
-                                self.get_splits()
-                                if self.defect > defect_old:
-                                    T.add_edge(*e)
-                                    self.nodes_df[self.district_type] = self.nodes_df['old']
-                                    self.get_splits()
-                                    self.get_stats()
-                                    continue
-                            
+                                if accept(comp):
+                                    self.get_defect()
+                                    if self.defect > defect_old:
+                                        reject(comp)
+                                        self.get_defect()
+                                        continue
+                        self.get_stats()
+                        assert abs(self.pop_deviation - pop_deviation_new) < 1e-2, f'disagreement betwen pop_deviation calculations {self.pop_deviation} v {pop_deviation_new}'
+
+                        x = H.nodes(data=True)
+                        s = (sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]==d0) -
+                             sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]!=d0) +
+                             sum(x[n]['aland'] for n in comp[1] if x[n][self.district_type]==d1) -
+                             sum(x[n]['aland'] for n in comp[1] if x[n][self.district_type]!=d1))
+                        if s < 0:
+                            comp[0], comp[1] = comp[1], comp[0]
+                            accept(comp)
+                        self.get_defect()
+                        self.get_stats()
+                        return True
+
                         
 #                         if I < 0:
 #                             if self.anneal < 1e-7:
@@ -377,23 +502,16 @@ order by
                         # To achieve this, add aland of nodes that have the same od & new district label
                         # and subtract aland of nodes that change district label.  If negative, swap d0 & d1.
                         
-                        X = self.nodes_df.loc[m].groupby([self.district_type, 'old'])['aland'].sum().reset_index()
-                        mask = X[self.district_type] == X['old']
-                        if np.sum(X.loc[mask,'aland']) < np.sum(X.loc[~mask,'aland']):
-                            d0, d1 = d1, d0
-                            self.nodes_df.loc[comp[0], self.district_type] = d0
-                            self.nodes_df.loc[comp[1], self.district_type] = d1
-                            self.get_splits()
-                            self.get_stats()
-
-
-#                         x = H.nodes(data=True)
-#                         s = (sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]==d0) -
-#                              sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]!=d0) +
-#                              sum(x[n]['aland'] for n in comp[1] if x[n][self.district_type]==d1) -
-#                              sum(x[n]['aland'] for n in comp[1] if x[n][self.district_type]!=d1))
-#                         if s < 0:
+#                         X = self.nodes_df.loc[m].groupby([self.district_type, 'old'])['aland'].sum().reset_index()
+#                         mask = X[self.district_type] == X['old']
+#                         if np.sum(X.loc[mask,'aland']) < np.sum(X.loc[~mask,'aland']):
 #                             d0, d1 = d1, d0
+#                             self.nodes_df.loc[comp[0], self.district_type] = d0
+#                             self.nodes_df.loc[comp[1], self.district_type] = d1
+#                             self.get_defect()
+#                             self.get_stats()
+
+
                                 
 #                         # Update district labels
 #                         for n in comp[0]:
@@ -403,18 +521,13 @@ order by
                             
                             
                         # update stats
-                        self.get_stats()
-                        assert abs(self.pop_deviation - pop_deviation_new) < 1e-2, f'disagreement betwen pop_deviation calculations {self.pop_deviation} v {pop_deviation_new}'
-                        if self.hash in self.hash_rec: # if we've already seen that plan before, reject and keep trying for a new one
-#                             rpt(f'duplicate plan {self.hash}')
-                            T.add_edge(*e)
-                            self.nodes_df[self.district_type] = self.nodes_df['old']
-                            self.get_splits()
-                            self.get_stats()
-                            
-                        else:  # if this is a never-before-seen plan, keep it and return happy
-#                             rpt(f'recombed {self.district_type} {d0} & {d1} got pop_deviation={self.pop_deviation:.2f}%')
-                            return True
+#                         if self.hash in self.hash_rec: # if we've already seen that plan before, reject and keep trying for a new one
+# #                             rpt(f'duplicate plan {self.hash}')
+#                             T.add_edge(*e)
+#                             reject(comp)
+#                         else:  # if this is a never-before-seen plan, keep it and return happy
+# #                             rpt(f'recombed {self.district_type} {d0} & {d1} got pop_deviation={self.pop_deviation:.2f}%')
+#                             return True
 
 
 
@@ -462,7 +575,7 @@ order by
         self.hash_query_list = [f"""
 select
     random_seed,
-    plan,
+    step,
     A.hash as hash_plan
 from
     {tbls["summaries"]} as A""" for random_seed, tbls in self.tbls.items()]
@@ -478,7 +591,7 @@ select
 from (
     select
         *,
-        row_number() over (partition by hash_plan order by plan asc, random_seed asc) as r
+        row_number() over (partition by hash_plan order by step asc, random_seed asc) as r
     from (
         {subquery(self.hash_batch_stack, indents=1)}
         )
@@ -493,7 +606,7 @@ where
         self.join_query_list = [f"""
 select
     H.random_seed,
-    H.plan,
+    H.step,
     H.{self.district_type},
     I.hash as hash_plan,
     J.* except (random_seed),
@@ -507,7 +620,7 @@ select
     H.aland,
     H.total_pop,
     case when H.aland > 0 then H.total_pop / H.aland else 0 end as density,
-    G.* except (random_seed, plan, {self.district_type})
+    G.* except (random_seed, step, {self.district_type})
 from (
     select
         E.* except (geoid),
@@ -518,36 +631,36 @@ from (
         from (
             select
                 A.random_seed,
-                A.plan
+                A.step
             from
                 {self.hash_tbl} as A
             inner join
                 {tbls['summaries']} as B
             on
-                A.random_seed = B.random_seed and A.plan = B.plan
+                A.random_seed = B.random_seed and A.step = B.step
             where
                 B.pop_deviation < {self.pop_deviation_thresh}
             ) as C
         inner join
             {tbls['plans']} as D
         on
-            C.random_seed = D.random_seed and C.plan = D.plan
+            C.random_seed = D.random_seed and C.step = D.step
         ) as E
     inner join
         {self.nodes_tbl} as F
     on
         E.geoid = F.geoid
     group by
-        random_seed, plan, {self.district_type}
+        random_seed, step, {self.district_type}
     ) as G
 inner join
     {tbls['stats']} as H
 on
-    G.random_seed = H.random_seed and G.plan = H.plan and G.{self.district_type} = H.{self.district_type}
+    G.random_seed = H.random_seed and G.step = H.step and G.{self.district_type} = H.{self.district_type}
 inner join
     {tbls['summaries']} as I
 on
-    H.random_seed = I.random_seed and H.plan = I.plan
+    H.random_seed = I.random_seed and H.step = I.step
 inner join
     {tbls['params']} as J
 on
