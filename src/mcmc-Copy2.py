@@ -47,29 +47,17 @@ class MCMC(Base):
         self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.seats_col] + list(self.node_attrs)).set_index('geoid')
         self.nodes_df['random_seed'] = self.random_seed
         
-        self.districts = set(self.nodes_df[self.district_type].astype(int))
-        self.counties  = set(self.nodes_df['county'])
-
         self.step = 0
         self.total_pop  = self.nodes_df['total_pop'].sum()
         self.target_pop = self.total_pop / Seats[self.district_type]
         
-#         E = self.nodes_df[['county', self.district_type]].drop_duplicates()
-#         self.adj = nx.from_pandas_edgelist(E, source='county', target=self.district_type)
-        
-#         self.counties  = self.nodes_df.groupby('county')[['total_pop', self.seats_col]].sum()
-#         self.counties['whole_target']     = np.ceil (counties[self.seats_col]).astype(int)
-#         self.counties['intersect_target'] = np.floor(counties[self.seats_col]).astype(int)
-#         nx.set_node_attributes(self.adj, self.counties.to_dict('index'))
-
-#         self.districts = self.nodes_df.groupby(self.district_type)[['total_pop', 'aland', 'perim']].sum()
-#         nx.set_node_attributes(self.adj, self.districts.to_dict('index'))
-
-        
-        
-        
-
-        
+        grp = self.nodes_df.groupby('county')
+        self.counties = {k:{'nodes':tuple(sorted(v.index)),
+                            'total_pop'       :              v['total_pop'].sum(),
+                            'seats_share'     :              v[self.seats_col].sum(),
+                            'whole_target'    : int(np.floor(v[self.seats_col].sum())),
+                            'intersect_target': int(np.ceil (v[self.seats_col].sum())),
+                            } for k,v in grp}
         
         self.get_graph()
         self.get_stats()
@@ -79,16 +67,6 @@ class MCMC(Base):
         self.defect_init = self.defect
         self.defect_cap = int(self.defect_multiplier * self.defect_init)
 #         print(f'defect_init = {self.defect_init}, setting ceiling for mcmc of {self.defect_cap}')
-
-
-    def get_components(self, H):
-        return sorted([sorted(tuple(x)) for x in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
-
-    def district_view(self, district):
-        return nx.subgraph_view(self.graph, lambda n: self.graph.nodes[n][self.district_type] == district)
-
-    def get_components_district(self, district):
-        return self.get_components(self.district_view(district))
 
         
     def get_graph(self):
@@ -117,16 +95,19 @@ order by
         self.edges = run_query(query)
         self.graph = nx.from_pandas_edgelist(self.edges, source=f'geoid_x', target=f'geoid_y', edge_attr=self.edge_attrs)
         nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
-#         grp = self.nodes_df.groupby(self.district_type)
-#         self.districts = {k:{'nodes':tuple(sorted(v))} for k,v in grp.groups.items()}
+        grp = self.nodes_df.groupby(self.district_type)
+        self.districts = {k:{'nodes':tuple(sorted(v))} for k,v in grp.groups.items()}
         
+        new_districts = Seats[self.district_type] - len(self.districts)
+        new_district_starts = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
+        del self.nodes_df
 
-
+        self.get_districts()        
 #         print(f'connecting districts')
         connected = False
         while not connected:
             connected = True
-            for d in self.districts:
+            for d, data in self.districts.items():
                 comp = self.get_components_district(d)
 #                 rpt(f"District {self.district_type} {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}")
                 if len(comp) > 1:
@@ -136,12 +117,9 @@ order by
                         for x in c:
                             y = self.rng.choice(list(self.graph.neighbors(x)))
                             self.graph.nodes[x][self.district_type] = self.graph.nodes[y][self.district_type]
+        self.get_districts()
 
-        new_districts = Seats[self.district_type] - len(self.districts)
-        new_district_starts = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
-        del self.nodes_df
-
-        d_new = max(self.districts) + 1 
+        d_new = int(max(self.districts.keys())) + 1 
         while new_districts > 0:
             n = new_district_starts.pop(0)
 #             rpt(f'try to start district {M} at node {n}')
@@ -150,131 +128,69 @@ order by
             comp = self.get_components_district(d_old)
             if len(comp) == 1:
 #                 rpt('success')
-                self.districts.add(d_new)
+                self.districts[d_new] = dict()            
                 d_new += 1
                 new_districts -= 1
             else:
 #                 rpt('fail')
                 self.graph.nodes[n][self.district_type] = d_old
-    
-        self.adj = nx.Graph()
+        self.get_districts()
+        
+        
+    def get_components_district(self, district):
+        H = nx.subgraph_view(self.graph, lambda n: self.graph.nodes[n][self.district_type] == district)
+        return self.get_components(H)
+
+
+    def get_components(self, H):
+        return sorted([sorted(tuple(x)) for x in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
+
+
+    def get_districts(self):
+        for d, data in self.districts.items():
+            data['nodes'] = list()
+        for n, d in self.graph.nodes(data=self.district_type):
+            self.districts[d]['nodes'].append(n)
+        for d, data in self.districts.items():
+            data['nodes'] = tuple(sorted(tuple(set(data['nodes']))))
+        self.partition = tuple(sorted((data['nodes'] for d, data in self.districts.items())))
+        self.hash = self.partition.__hash__()
+
+
+    def get_stats(self, return_df=False):
+        self.get_districts()
+        attrs = ['total_pop', 'aland', 'perim']
+        for d, data in self.districts.items():
+            for a in attrs:
+                data[a] = 0
+            data['external_perim'] = 0
+
         for n, data in self.graph.nodes(data=True):
             d = data[self.district_type]
-            self.adj.add_node(d)
-            self.adj.nodes[d]['polsby_popper'] = 0
-            for k in ['total_pop', 'aland', 'perim']:
-                try:
-                    self.adj.nodes[d][k] += data[k]
-                except:
-                    self.adj.nodes[d][k] = data[k]
-            
-            c = data['county']
-            self.adj.add_node(c)
-            for k in ['total_pop', self.seats_col]:
-                try:
-                    self.adj.nodes[c][k] += data[k]
-                except:
-                    self.adj.nodes[c][k] = data[k]
-            
-            self.adj.add_edge(c, d)
-        
-        for c in self.counties:
-            self.adj.nodes[c]['whole_target']     = np.ceil (self.adj.nodes[c][self.seats_col])
-            self.adj.nodes[c]['intersect_target'] = np.floor(self.adj.nodes[c][self.seats_col])
-
-
-
-
-
-#     def get_districts(self):
-#         for d, data in self.districts.items():
-#             data['nodes'] = list()
-#         for n, d in self.graph.nodes(data=self.district_type):
-#             self.districts[d]['nodes'].append(n)
-#         for d, data in self.districts.items():
-#             data['nodes'] = tuple(sorted(tuple(set(data['nodes']))))
-#         self.partition = tuple(sorted((data['nodes'] for d, data in self.districts.items())))
-#         self.hash = self.partition.__hash__()
-
-
-    def get_stats(self, districts=None, return_df=False):
-        if districts is None:
-            districts = self.districts
-        dev_max = max(x for d, x in self.adj.nodes(data='pop_deviation') if d not in districts)
-        dev_min = min(x for d, x in self.adj.nodes(data='pop_deviation') if d not in districts)
-            
-        attrs = ['total_pop', 'aland', 'perim']
-        for d in districts:
-            stats = self.adj.nodes[d]
-            self.polsby_popper -= stats['polsby_popper']
-            H = self.district_view(d)
             for a in attrs:
-                stats[a] = sum(x for n, x in H.nodes(data=a))
-            stats['pop_deviation'] = (stats['total_pop'] - self.target_pop) / self.target_pop * 100
-            stats['internal_perim'] = sum(x for u, v, x in H.edges(data='shared_perim'))
-            stats['external_perim'] = stats['perim'] - 2*stats['internal_perim']
-            stats['polsby_popper'] = 4 * np.pi * stats['aland'] / (stats['external_perim']**2) * 100
-            self.polsby_popper += stats['polsby_popper']
-            
-            dev_max = max(dev_max, stats['pop_deviation'])
-            dev_min = min(dev_min, stats['pop_deviation'])
+                self.districts[d][a] += data[a]
+
+        dev_max = 0
+        dev_min = 10000
+        self.polsby_popper = 0
+        for d, data in self.districts.items():
+            H = self.graph.subgraph(data['nodes'])
+            data['internal_perim'] = sum(x for a, b, x in H.edges(data='shared_perim'))
+            data['external_perim'] = data['perim'] - 2 * data['internal_perim']
+            data['polsby_popper'] = 4 * np.pi * data['aland'] / (data['external_perim']**2) * 100
+            data['pop_deviation'] = (data['total_pop'] - self.target_pop) / self.target_pop * 100
+            self.polsby_popper += data['polsby_popper']
+            dev_max = max(dev_max, data['pop_deviation'])
+            dev_min = min(dev_min, data['pop_deviation'])
         self.pop_deviation = abs(dev_max) + abs(dev_min)
         if return_df:
-            H = nx.subgraph_view(self.adj, lambda n: self.adj.nodes[n] in self.district)
-            df = pd.DataFrame.from_dict(H, orient='index')
+            df = pd.DataFrame.from_dict(self.districts, orient='index').drop(columns=['nodes', 'county_intersect'])
             df.insert(0, 'step', int(self.step))
             df.insert(0, 'random_seed', int(self.random_seed))
             return df
-
-            
-            
-#         for n, data in self.graph.nodes(data=True):
-#             d = data[self.district_type]
-#             for a in attrs:
-#                 self.districts[d][a] += data[a]
-
-#         dev_max = 0
-#         dev_min = 10000
-#         self.polsby_popper = 0
-#         for d, data in self.districts.items():
-#             H = self.graph.subgraph(data['nodes'])
-#             data['internal_perim'] = sum(x for a, b, x in H.edges(data='shared_perim'))
-#             data['external_perim'] = data['perim'] - 2 * data['internal_perim']
-#             data['polsby_popper'] = 4 * np.pi * data['aland'] / (data['external_perim']**2) * 100
-#             data['pop_deviation'] = (data['total_pop'] - self.target_pop) / self.target_pop * 100
-#             self.polsby_popper += data['polsby_popper']
-#             dev_max = max(dev_max, data['pop_deviation'])
-#             dev_min = min(dev_min, data['pop_deviation'])
-#         self.pop_deviation = abs(dev_max) + abs(dev_min)
-#         if return_df:
-#             df = pd.DataFrame.from_dict(self.districts, orient='index').drop(columns=['nodes', 'county_intersect'])
-#             df.insert(0, 'step', int(self.step))
-#             df.insert(0, 'random_seed', int(self.random_seed))
-#             return df
             
 
-    def get_defect(self):
-        self.intersect_defect = 0
-        self.whole_defect = 0
-        self.defect = 0
-        for c in self.counties.index:
-            i = self.adj.degree[c]
-            di = abs(self.counties['intersect_target'] - i)
-            self.adj.nodes[c]['intersect'] = i
-            self.adj.nodes[c]['intersect_defect'] = di
-            self.intersect_defect += di
-            
-            w = sum(self.adj.degree[d] == 1 for d in self.adj[c])
-            dw = abs(self.counties['whole_target'] - w)
-            self.adj.nodes[c]['whole'] = w
-            self.adj.nodes[c]['whole_defect'] = dw
-            self.whole_defect += dw
-            
-            self.defect += (dw + di)
-
-        
-        
-        
+    def get_defect(self, return_df=False):
         self.get_districts()
         for d, data in self.districts.items():
             data['county_intersect'] = list()
