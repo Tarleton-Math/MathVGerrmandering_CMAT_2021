@@ -124,6 +124,7 @@ else:
 
 def f(random_seed):
     M = MCMC(random_seed=random_seed, **mcmc_opts)
+    print(f'starting seed {random_seed}')
     M.run_chain()
     return M
     
