@@ -42,20 +42,19 @@ nodes_opts = {
 }
     
 mcmc_opts = {
-    'max_steps'             : 1000000,
+    'max_steps'             : 10000000,
     'pop_diff_exp'          : 2,
-    'defect_valid_activate' : 1000,
-    'defect_valid_factor'   : 1.0,
+    'defect_multiplier'     : 2.0,
     'anneal'                : 0,
     'pop_deviation_target'  : 0.01,
-    'pop_deviation_stop'    : 'True',
+    'pop_deviation_stop'    : False,
     'report_period'         : 100,
     'save_period'           : 500,
 }
 
 run_opts = {
     'seed_start'      : 1000000,
-    'jobs_per_worker' : 5,
+    'jobs_per_worker' : 1,
     'workers'         : 80,
 }
 
@@ -101,13 +100,10 @@ mcmc_opts['nodes_tbl'] = N.tbl
 for opt in ['max_steps', 'pop_diff_exp', 'report_period']:
     mcmc_opts[opt] = int(mcmc_opts[opt])
 
-for opt in ['pop_deviation_target', 'anneal', 'defect_valid_activate']:
+for opt in ['pop_deviation_target', 'anneal', 'defect_multiplier']:
     mcmc_opts[opt] = float(mcmc_opts[opt])
     
-if mcmc_opts['pop_deviation_stop'].lower() in yes:
-    mcmc_opts['pop_deviation_stop'] = True
-else:
-    mcmc_opts['pop_deviation_stop'] = False
+mcmc_opts['pop_deviation_stop'] = bool(mcmc_opts['pop_deviation_stop'])
     
 for opt in ['seed_start', 'jobs_per_worker', 'workers']:
     run_opts[opt] = int(run_opts[opt])
