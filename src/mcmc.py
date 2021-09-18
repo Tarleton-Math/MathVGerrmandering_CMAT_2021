@@ -497,8 +497,7 @@ order by
                 query_stack = query
             if len(query_list) % batch_size == 0:
                 temp_tbls.append(f'{tbl}_{k}')
-                if run:
-                    load_table(tbl=temp_tbls[-1], query=query_stack)
+                load_table(tbl=temp_tbls[-1], query=query_stack)
                 rpt(f'{len(query_list)} remain')
                 del query_stack
                 k += 1
