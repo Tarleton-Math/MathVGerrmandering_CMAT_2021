@@ -538,7 +538,7 @@ from
     {tbls["summaries"]} as A
 """ for random_seed, tbls in self.tbls.items()]
         self.hash_tbl = f'{self.tbl}_hash'
-        self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=True)
+        self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=False)
 
 
         rpt('stacking hash batches')
@@ -557,13 +557,14 @@ from (
 where
     r = 1
 """
-        load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
-        for tbl in self.hash_temp_tbls:
-            delete_table(tbl)
+#         load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
+#         for tbl in self.hash_temp_tbls:
+#             delete_table(tbl)
 
 
         for random_seed, tbls in self.tbls.items():
             rpt(f'combining tables for random_seed {random_seed}')
+            tbls['combined'] = f"{tbls['stats'][:-5]}combined"
             query = f"""
 select
     H.random_seed,
@@ -591,11 +592,16 @@ from (
             D.*
         from (
             select
-                *
+                A.random_seed,
+                A.plan
             from
-                {self.hash_tbl}
+                {self.hash_tbl} as A
+            inner join
+                {tbls['summaries']} as B
+            on
+                A.random_seed = B.random_seed and A.plan = B.plan
             where
-                pop_deviation < {self.postprocess_thresh}
+                B.pop_deviation < {self.postprocess_thresh}
             ) as C
         inner join
             {tbls['plans']} as D
@@ -614,6 +620,10 @@ inner join
 on
     G.random_seed = H.random_seed and G.plan = H.plan and G.{self.district_type} = H.{self.district_type}
 inner join
+    {tbls['summaries']} as I
+on
+    H.random_seed = I.random_seed and H.plan = I.plan
+inner join
     {tbls['params']} as J
 on
     I.random_seed = J.random_seed
@@ -625,6 +635,76 @@ on
         rpt('stacking combined tables')
         query = u.join([f'select * from {tbls[combined]} where pop_deviation_plan < {self.postprocess_thresh}' for random_seed, tbls in self.tbls.items()])
         load_table(tbl=self.tbl, query=query)
+
+
+
+
+
+            
+            
+            
+            
+            
+            
+#             query = f"""
+# select
+#     A.random_seed,
+#     A.plan,
+#     A.{self.district_type},
+#     A.hash_plan,
+#     PARAMS.* except (random_seed),
+#     A.whole_defect_plan,
+#     A.intersect_defect_plan,
+#     A.defect_plan,
+#     A.pop_deviation_plan,
+#     STATS.pop_deviation as pop_deviation_district,
+#     A.polsby_popper_plan,
+#     STATS.polsby_popper as polsby_popper_district,
+#     STATS.aland,
+#     STATS.total_pop,
+#     case when STATS.aland > 0 then STATS.total_pop / STATS.aland else 0 end as density,
+#     A.* except (random_seed, plan, {self.district_type}, hash_plan, whole_defect_plan, intersect_defect_plan, defect_plan, pop_deviation_plan)
+# from (
+#     select
+#         E.random_seed,
+#         E.plan,
+#         E.{self.district_type},
+        
+#         E.* except (geoid),
+#         {join_str(2).join([f'sum(F.{c}) as {c}' for c in self.cols])}
+#     from (
+#         select
+#             C.*,
+#             D.* except (random_seed, plan)
+#         from (
+#             select
+#                 *
+#             from
+#                 {self.hash_tbl}
+#             where
+#                 pop_deviation_plan < {self.postprocess_thresh}
+#             ) as C
+#         inner join
+#             {tbls['plans']} as D
+#         on
+#             C.random_seed = D.random_seed and C.plan = D.plan
+#         ) as E
+#     inner join
+#         {self.nodes_tbl} as F
+#     on
+#         E.geoid = F.geoid
+#     group by
+#         random_seed, plan, {self.district_type}
+#     ) as A
+# inner join
+#     {tbls['stats']} as STATS
+# on
+#     A.random_seed = STATS.random_seed and A.plan = STATS.plan and A.{self.district_type} = STATS.{self.district_type}
+# inner join
+#     {tbls['params']} as PARAMS
+# on
+#     A.random_seed = PARAMS.random_seed
+# """
             
             
             
