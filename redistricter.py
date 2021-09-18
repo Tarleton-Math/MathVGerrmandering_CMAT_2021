@@ -44,7 +44,7 @@ nodes_opts = {
 mcmc_opts = {
     'max_steps'             : 10000000,
     'pop_diff_exp'          : 2,
-    'defect_multiplier'     : 3.0,
+    'defect_multiplier'     : 1.0,
     'anneal'                : 0,
     'pop_deviation_target'  : 10.0,
     'pop_deviation_stop'    : False,
@@ -53,9 +53,9 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'      : 1000000,
-    'jobs_per_worker' : 1,
-    'workers'         : 80,
+    'seed_start'      : 2000000,
+    'jobs_per_worker' : 4,
+    'workers'         : 16,
 }
 
 if not skip_inputs:
