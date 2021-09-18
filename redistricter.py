@@ -37,23 +37,23 @@ from src.nodes import *
 nodes_opts = {
     'abbr'             : 'TX',
     'level'            : 'cntyvtd',
-    'district_type'    : 'cd',
+    'district_type'    : 'sldl',
     'contract_thresh'  : 10,
 }
     
 mcmc_opts = {
     'max_steps'             : 10000000,
     'pop_diff_exp'          : 2,
-    'defect_multiplier'     : 2.0,
+    'defect_multiplier'     : 3.0,
     'anneal'                : 0,
-    'pop_deviation_target'  : 0.01,
+    'pop_deviation_target'  : 10.0,
     'pop_deviation_stop'    : False,
-    'report_period'         : 50,
+    'report_period'         : 25,
     'save_period'           : 500,
 }
 
 run_opts = {
-    'seed_start'      : 2000000,
+    'seed_start'      : 1000000,
     'jobs_per_worker' : 1,
     'workers'         : 80,
 }

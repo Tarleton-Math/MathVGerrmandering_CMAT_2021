@@ -553,10 +553,15 @@ where
     r = 1
 """
         load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
+        for tbl in self.hash_temp_tbls:
+            delete_table(tbl)
 
+        
 
-        print('joining tables in batches')
-        self.join_query_list = [f"""
+        for random_seed, tbls in self.tbls.items():
+            print('combining tables for each random_seed')
+            tbls['combined'] = f"{tbls['stats'][:-5]}combined"
+            query = f"""
 select
     H.random_seed,
     H.plan,
@@ -618,18 +623,12 @@ inner join
     {tbls['params']} as J
 on
     I.random_seed = J.random_seed
-""" for random_seed, tbls in self.tbls.items()]
-        self.join_tbl = f'{self.tbl}_join'
-        self.join_temp_tbls = run_batches(self.join_query_list, tbl=self.join_tbl, run=True)
-
-        print('stacking joined table batches')
-        self.join_batch_stack = u.join([f'select * from {tbl}' for tbl in self.join_temp_tbls])
-        self.stack_tbl = f'{self.tbl}_stack'
-        load_table(tbl=self.tbl, query=self.join_batch_stack)
-        for tbl in self.hash_temp_tbls:
-            delete_table(tbl)
-        for tbl in self.join_temp_tbls:
-            delete_table(tbl)
+"""
+            load_table(tbl=tbls['combined'], query=query)
+            
+        print('stacking combined tables')
+        query = u.join([f'select * from {tbls[combined]}' for random_seed, tbls in self.tbls.items()])
+        load_table(tbl=self.tbl, query=query)
             
             
             
