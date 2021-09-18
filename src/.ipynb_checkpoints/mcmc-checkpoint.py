@@ -17,7 +17,7 @@ class MCMC(Base):
     node_attrs            : typing.Tuple = ('total_pop', 'aland', 'perim')
     max_results           : int = None
     batch_size            : int = 100
-    pop_deviation_thresh  : float = 10.0
+    postprocess_thresh    : float = 10.0
 
 
     def __post_init__(self):
@@ -416,7 +416,7 @@ order by
                         
                         def accept(comp):
                             for d, c in zip([d0,d1], comp):
-                                self.districts[d] = set(c)
+                                self.districts[d] = set(c).copy()
                                 self.adj.remove_edges_from([(d, n) for n in self.adj[d]])
 
                             for n in comp[0]:
@@ -426,11 +426,11 @@ order by
                                 self.graph.nodes[n][self.district_type] = d1
                                 self.adj.add_edge(self.graph.nodes[n]['county'], self.graph.nodes[n][self.district_type])
 
-                            novel = self.get_hash() not in self.hash_rec
-                            if not novel: # if we've already seen that plan before, reject and keep trying for a new one
-#                             rpt(f'duplicate plan {self.hash}')
-                                reject(comp)
-                            return novel
+#                             novel = self.get_hash() not in self.hash_rec
+#                             if not novel: # if we've already seen that plan before, reject and keep trying for a new one
+# #                             rpt(f'duplicate plan {self.hash}')
+#                                 reject(comp)
+                            return True
                             
                         def reject(comp):
                             T.add_edge(*e)
@@ -517,14 +517,14 @@ order by
                     temp_tbls.append(f'{tbl}_{k}')
                     if run:
                         load_table(tbl=temp_tbls[-1], query=query_stack)
-                    print(f'{len(query_list)} remain')
+                    rpt(f'{len(query_list)} remain')
                     del query_stack
                     k += 1
             return temp_tbls
 
 
         
-        print('stacking hashes into batches')
+        rpt('stacking hashes into batches')
         self.hash_query_list = [f"""
 select
     random_seed,
@@ -536,7 +536,7 @@ from
         self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=True)
 
 
-        print('stacking hash batches')
+        rpt('stacking hash batches')
         self.hash_batch_stack = u.join([f'select * from {tbl}' for tbl in self.hash_temp_tbls])
         self.hash_batch_stack = f"""
 select
@@ -556,10 +556,9 @@ where
         for tbl in self.hash_temp_tbls:
             delete_table(tbl)
 
-        
 
         for random_seed, tbls in self.tbls.items():
-            print('combining tables for each random_seed')
+            rpt(f'combining tables for random_seed {random_seed}')
             tbls['combined'] = f"{tbls['stats'][:-5]}combined"
             query = f"""
 select
@@ -597,7 +596,7 @@ from (
             on
                 A.random_seed = B.random_seed and A.plan = B.plan
             where
-                B.pop_deviation < {self.pop_deviation_thresh}
+                B.pop_deviation < {self.postprocess_thresh}
             ) as C
         inner join
             {tbls['plans']} as D
@@ -626,7 +625,7 @@ on
 """
             load_table(tbl=tbls['combined'], query=query)
             
-        print('stacking combined tables')
+        rpt('stacking combined tables')
         query = u.join([f'select * from {tbls[combined]}' for random_seed, tbls in self.tbls.items()])
         load_table(tbl=self.tbl, query=query)
             
