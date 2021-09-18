@@ -520,42 +520,31 @@ order by
     
     
     def post_process2(self):
-        u = '\nunion all\n'    
-        rpt('stacking hashes into batches')
-        self.hash_query_list = [f"""
-select
-    random_seed,
-    plan,
-    A.hash as hash_plan,
-    pop_deviation as pop_deviation_plan,
-    intersect_defect as intersect_defect_plan,
-    whole_defect as whole_defect_plan,
-    defect as defect_plan,
-from
-    {tbls["summaries"]} as A
-""" for random_seed, tbls in self.tbls.items()]
         self.hash_tbl = f'{self.tbl}_hash'
-        self.hash_temp_tbls = self.run_batches(self.hash_query_list, self.batch_size, self.hash_tbl)
-
-        rpt('stacking hash batches')
-        self.hash_batch_stack = u.join([f'select * from {tbl}' for tbl in self.hash_temp_tbls])
-        self.hash_batch_stack = f"""
+        u = '\nunion all\n'
+        query = u.join([f'select * from {tbls["summaries"]}' for random_seed, tbls in self.tbls.items()])
+        
+        query = f"""
 select
     * except (r)
 from (
     select
-        *,
-        row_number() over (partition by hash_plan order by plan asc, random_seed asc) as r
+        random_seed,
+        plan,
+        A.hash as hash_plan,
+        pop_deviation as pop_deviation_plan,
+        intersect_defect as intersect_defect_plan,
+        whole_defect as whole_defect_plan,
+        defect as defect_plan,
+        row_number() over (partition by A.hash order by plan asc, random_seed asc) as r
     from (
-        {subquery(self.hash_batch_stack, indents=1)}
-        )
+        {query}
+        ) as A
     )
-where
-    r = 1
+where r = 1
 """
-        load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
-        for tbl in self.hash_temp_tbls:
-            delete_table(tbl)
+        load_table(tbl=self.hash_tbl, query=query)
+
                     
         
     def post_process3(self):
@@ -639,7 +628,42 @@ on
 
 
 
-            
+#         u = '\nunion all\n'
+#         rpt('stacking hashes into batches')
+#         self.hash_query_list = [f"""
+# select
+#     random_seed,
+#     plan,
+#     A.hash as hash_plan,
+#     pop_deviation as pop_deviation_plan,
+#     intersect_defect as intersect_defect_plan,
+#     whole_defect as whole_defect_plan,
+#     defect as defect_plan,
+# from
+#     {tbls["summaries"]} as A
+# """ for random_seed, tbls in self.tbls.items()]
+#         self.hash_tbl = f'{self.tbl}_hash'
+#         self.hash_temp_tbls = self.run_batches(self.hash_query_list, self.batch_size, self.hash_tbl)
+
+#         rpt('stacking hash batches')
+#         self.hash_batch_stack = u.join([f'select * from {tbl}' for tbl in self.hash_temp_tbls])
+#         self.hash_batch_stack = f"""
+# select
+#     * --except (r)
+# from (
+#     select
+#         *,
+#         row_number() over (partition by hash_plan order by plan asc, random_seed asc) as r
+#     from (
+#         {subquery(self.hash_batch_stack, indents=1)}
+#         )
+#     )
+# --where
+#   --  r = 1
+# """
+#         load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
+#         for tbl in self.hash_temp_tbls:
+#             delete_table(tbl)
             
             
             
