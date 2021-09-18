@@ -529,9 +529,14 @@ order by
 select
     random_seed,
     plan,
-    A.hash as hash_plan
+    A.hash as hash_plan,
+    pop_deviation as pop_deviation_plan,
+    intersect_defect as intersect_defect_plan,
+    whole_defect as whole_defect_plan,
+    defect as defect_plan,
 from
-    {tbls["summaries"]} as A""" for random_seed, tbls in self.tbls.items()]
+    {tbls["summaries"]} as A
+""" for random_seed, tbls in self.tbls.items()]
         self.hash_tbl = f'{self.tbl}_hash'
         self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=True)
 
@@ -559,7 +564,6 @@ where
 
         for random_seed, tbls in self.tbls.items():
             rpt(f'combining tables for random_seed {random_seed}')
-            tbls['combined'] = f"{tbls['stats'][:-5]}combined"
             query = f"""
 select
     H.random_seed,
@@ -587,16 +591,11 @@ from (
             D.*
         from (
             select
-                A.random_seed,
-                A.plan
+                *
             from
-                {self.hash_tbl} as A
-            inner join
-                {tbls['summaries']} as B
-            on
-                A.random_seed = B.random_seed and A.plan = B.plan
+                {self.hash_tbl}
             where
-                B.pop_deviation < {self.postprocess_thresh}
+                pop_deviation < {self.postprocess_thresh}
             ) as C
         inner join
             {tbls['plans']} as D
@@ -615,23 +614,87 @@ inner join
 on
     G.random_seed = H.random_seed and G.plan = H.plan and G.{self.district_type} = H.{self.district_type}
 inner join
-    {tbls['summaries']} as I
-on
-    H.random_seed = I.random_seed and H.plan = I.plan
-inner join
     {tbls['params']} as J
 on
     I.random_seed = J.random_seed
 """
+            tbls['combined'] = f"{tbls['stats'][:-5]}combined"
+#             if not check_table(tbls['combined']):
             load_table(tbl=tbls['combined'], query=query)
             
         rpt('stacking combined tables')
-        query = u.join([f'select * from {tbls[combined]}' for random_seed, tbls in self.tbls.items()])
+        query = u.join([f'select * from {tbls[combined]} where pop_deviation_plan < {self.postprocess_thresh}' for random_seed, tbls in self.tbls.items()])
         load_table(tbl=self.tbl, query=query)
             
             
             
             
+
+            
+            
+            
+#             query = f"""
+# select
+#     H.random_seed,
+#     H.plan,
+#     H.{self.district_type},
+#     I.hash as hash_plan,
+#     J.* except (random_seed),
+#     I.whole_defect as whole_defect_plan,
+#     I.intersect_defect as intersect_defect_plan,
+#     I.defect as defect_plan,
+#     I.pop_deviation as pop_deviation_plan,
+#     H.pop_deviation as pop_deviation_district,
+#     I.polsby_popper as polsby_popper_plan,
+#     H.polsby_popper as polsby_popper_district,
+#     H.aland,
+#     H.total_pop,
+#     case when H.aland > 0 then H.total_pop / H.aland else 0 end as density,
+#     G.* except (random_seed, plan, {self.district_type})
+# from (
+#     select
+#         E.* except (geoid),
+#         {join_str(2).join([f'sum(F.{c}) as {c}' for c in self.cols])}
+#     from (
+#         select
+#             D.*
+#         from (
+#             select
+#                 *
+#             from
+#                 {self.hash_tbl} as A
+#             inner join
+#                 {tbls['summaries']} as B
+#             on
+#                 A.random_seed = B.random_seed and A.plan = B.plan
+#             where
+#                 B.pop_deviation < {self.postprocess_thresh}
+#             ) as C
+#         inner join
+#             {tbls['plans']} as D
+#         on
+#             C.random_seed = D.random_seed and C.plan = D.plan
+#         ) as E
+#     inner join
+#         {self.nodes_tbl} as F
+#     on
+#         E.geoid = F.geoid
+#     group by
+#         random_seed, plan, {self.district_type}
+#     ) as G
+# inner join
+#     {tbls['stats']} as H
+# on
+#     G.random_seed = H.random_seed and G.plan = H.plan and G.{self.district_type} = H.{self.district_type}
+# --inner join
+# --    {tbls['summaries']} as I
+# --on
+# --    H.random_seed = I.random_seed and H.plan = I.plan
+# inner join
+#     {tbls['params']} as J
+# on
+#     I.random_seed = J.random_seed
+# """
             
             
             
