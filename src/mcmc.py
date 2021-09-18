@@ -485,9 +485,27 @@ order by
                         self.get_stats()
                         return True
 
-        
-    def post_process(self):
-        u = '\nunion all\n'
+                    
+    def run_batches(self, query_list, batch_size, tbl):
+        temp_tbls = list()
+        k = 0
+        while query_list:
+            query = query_list.pop()
+            try:
+                query_stack = query_stack + u + query
+            except:
+                query_stack = query
+            if len(query_list) % batch_size == 0:
+                temp_tbls.append(f'{tbl}_{k}')
+                if run:
+                    load_table(tbl=temp_tbls[-1], query=query_stack)
+                rpt(f'{len(query_list)} remain')
+                del query_stack
+                k += 1
+        return temp_tbls
+
+
+    def post_process1(self):    
         self.tbls = dict()
         for src_tbl in bqclient.list_tables(self.ds, max_results=self.max_results):
             full  = src_tbl.full_table_id.replace(':', '.')
@@ -499,31 +517,11 @@ order by
                     self.tbls[random_seed][key] = full
                 except:
                     self.tbls[random_seed] = {key : full}
-
         self.tbls = {random_seed : tbls for random_seed, tbls in self.tbls.items() if len(tbls)>=3}
-        self.cols = [c for c in get_cols(self.nodes_tbl) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
-        
-        def run_batches(query_list, batch_size=self.batch_size, tbl=self.tbl, run=True):
-            temp_tbls = list()
-            k = 0
-            while query_list:
-                query = query_list.pop()
-                try:
-                    query_stack = query_stack + u + query
-                except:
-                    query_stack = query
-                    
-                if len(query_list) % batch_size == 0:
-                    temp_tbls.append(f'{tbl}_{k}')
-                    if run:
-                        load_table(tbl=temp_tbls[-1], query=query_stack)
-                    rpt(f'{len(query_list)} remain')
-                    del query_stack
-                    k += 1
-            return temp_tbls
-
-
-        
+    
+    
+    def post_process2(self):
+        u = '\nunion all\n'    
         rpt('stacking hashes into batches')
         self.hash_query_list = [f"""
 select
@@ -538,8 +536,7 @@ from
     {tbls["summaries"]} as A
 """ for random_seed, tbls in self.tbls.items()]
         self.hash_tbl = f'{self.tbl}_hash'
-        self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=False)
-
+        self.hash_temp_tbls = self.run_batches(self.hash_query_list, self.batch_size, self.hash_tbl)
 
         rpt('stacking hash batches')
         self.hash_batch_stack = u.join([f'select * from {tbl}' for tbl in self.hash_temp_tbls])
@@ -557,11 +554,14 @@ from (
 where
     r = 1
 """
-#         load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
-#         for tbl in self.hash_temp_tbls:
-#             delete_table(tbl)
-
-
+        load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
+        for tbl in self.hash_temp_tbls:
+            delete_table(tbl)
+                    
+        
+    def post_process3(self):
+        u = '\nunion all\n'
+        self.cols = [c for c in get_cols(self.nodes_tbl) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
         for random_seed, tbls in self.tbls.items():
             rpt(f'combining tables for random_seed {random_seed}')
             tbls['combined'] = f"{tbls['stats'][:-5]}combined"
