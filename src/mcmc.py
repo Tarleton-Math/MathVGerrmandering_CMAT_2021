@@ -23,7 +23,10 @@ class MCMC(Base):
     def __post_init__(self):
         self.start_time = time.time()
         w = self.nodes_tbl.split('.')[-1].split('_')[1:]
-        self.abbr, self.yr, self.level, self.district_type, self.contract_thresh = w
+        try:
+            self.abbr, self.yr, self.level, self.district_type, self.contract_thresh = w
+        except:
+            self.abbr, self.yr, self.level, self.district_type = w
         self.stem = '_'.join(w)
         self.name = f'{self.stem}_{self.random_seed}'
 
@@ -44,15 +47,6 @@ class MCMC(Base):
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
         self.seats_col = f'seats_{self.district_type}'
-        self.node_attrs = listify(self.node_attrs) + [self.district_type]
-        self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.seats_col] + list(self.node_attrs)).set_index('geoid')
-        
-        grp = self.nodes_df.groupby(self.district_type)
-        self.districts = {k:set(v) for k,v in grp.groups.items()}
-        grp = self.nodes_df.groupby('county')
-        self.counties  = {k:set(v) for k,v in grp.groups.items()}
-        self.total_pop  = self.nodes_df['total_pop'].sum()
-        self.target_pop = self.total_pop / Seats[self.district_type]
 
 
     def get_graph(self):
@@ -270,6 +264,17 @@ order by
         
     def run_chain(self):
         self.polsby_popper = 0
+        
+        self.node_attrs = listify(self.node_attrs) + [self.district_type]
+        self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.seats_col] + list(self.node_attrs)).set_index('geoid')
+        
+        grp = self.nodes_df.groupby(self.district_type)
+        self.districts = {k:set(v) for k,v in grp.groups.items()}
+        grp = self.nodes_df.groupby('county')
+        self.counties  = {k:set(v) for k,v in grp.groups.items()}
+        self.total_pop  = self.nodes_df['total_pop'].sum()
+        self.target_pop = self.total_pop / Seats[self.district_type]
+
         self.get_graph()
         self.get_defect()
         self.get_stats()
@@ -424,10 +429,10 @@ order by
                                 self.graph.nodes[n][self.district_type] = d1
                                 self.adj.add_edge(self.graph.nodes[n]['county'], self.graph.nodes[n][self.district_type])
 
-#                             novel = self.get_hash() not in self.hash_rec
-#                             if not novel: # if we've already seen that plan before, reject and keep trying for a new one
+                            novel = self.get_hash() not in self.hash_rec[-5:]
+                            if not novel: # if we've already seen that plan before, reject and keep trying for a new one
 # #                             rpt(f'duplicate plan {self.hash}')
-#                                 reject(comp)
+                                reject(comp)
                             return True
                             
                         def reject(comp):
