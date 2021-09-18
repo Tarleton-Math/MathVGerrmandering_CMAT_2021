@@ -630,3 +630,156 @@ on
             delete_table(tbl)
         for tbl in self.join_temp_tbls:
             delete_table(tbl)
+            
+            
+            
+            
+            
+            
+            
+            
+            
+#     def post_process(self):
+#         u = '\nunion all\n'
+#         self.tbls = dict()
+#         for src_tbl in bqclient.list_tables(self.ds, max_results=self.max_results):
+#             full  = src_tbl.full_table_id.replace(':', '.')
+#             short = src_tbl.table_id
+#             random_seed = short.split('_')[-2]
+#             key  = short.split('_')[-1]
+#             if random_seed.isnumeric():
+#                 try:
+#                     self.tbls[random_seed][key] = full
+#                 except:
+#                     self.tbls[random_seed] = {key : full}
+
+#         self.tbls = {random_seed : tbls for random_seed, tbls in self.tbls.items() if len(tbls)>=3}
+#         self.cols = [c for c in get_cols(self.nodes_tbl) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
+        
+#         def run_batches(query_list, batch_size=self.batch_size, tbl=self.tbl, run=True):
+#             temp_tbls = list()
+#             k = 0
+#             while query_list:
+#                 query = query_list.pop()
+#                 try:
+#                     query_stack = query_stack + u + query
+#                 except:
+#                     query_stack = query
+                    
+#                 if len(query_list) % batch_size == 0:
+#                     temp_tbls.append(f'{tbl}_{k}')
+#                     if run:
+#                         load_table(tbl=temp_tbls[-1], query=query_stack)
+#                     print(f'{len(query_list)} remain')
+#                     del query_stack
+#                     k += 1
+#             return temp_tbls
+
+
+        
+#         print('stacking hashes into batches')
+#         self.hash_query_list = [f"""
+# select
+#     random_seed,
+#     plan,
+#     A.hash as hash_plan
+# from
+#     {tbls["summaries"]} as A""" for random_seed, tbls in self.tbls.items()]
+#         self.hash_tbl = f'{self.tbl}_hash'
+#         self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=True)
+
+
+#         print('stacking hash batches')
+#         self.hash_batch_stack = u.join([f'select * from {tbl}' for tbl in self.hash_temp_tbls])
+#         self.hash_batch_stack = f"""
+# select
+#     * except (r)
+# from (
+#     select
+#         *,
+#         row_number() over (partition by hash_plan order by plan asc, random_seed asc) as r
+#     from (
+#         {subquery(self.hash_batch_stack, indents=1)}
+#         )
+#     )
+# where
+#     r = 1
+# """
+#         load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
+
+
+#         print('joining tables in batches')
+#         self.join_query_list = [f"""
+# select
+#     H.random_seed,
+#     H.plan,
+#     H.{self.district_type},
+#     I.hash as hash_plan,
+#     J.* except (random_seed),
+#     I.whole_defect as whole_defect_plan,
+#     I.intersect_defect as intersect_defect_plan,
+#     I.defect as defect_plan,
+#     I.pop_deviation as pop_deviation_plan,
+#     H.pop_deviation as pop_deviation_district,
+#     I.polsby_popper as polsby_popper_plan,
+#     H.polsby_popper as polsby_popper_district,
+#     H.aland,
+#     H.total_pop,
+#     case when H.aland > 0 then H.total_pop / H.aland else 0 end as density,
+#     G.* except (random_seed, plan, {self.district_type})
+# from (
+#     select
+#         E.* except (geoid),
+#         {join_str(2).join([f'sum(F.{c}) as {c}' for c in self.cols])}
+#     from (
+#         select
+#             D.*
+#         from (
+#             select
+#                 A.random_seed,
+#                 A.plan
+#             from
+#                 {self.hash_tbl} as A
+#             inner join
+#                 {tbls['summaries']} as B
+#             on
+#                 A.random_seed = B.random_seed and A.plan = B.plan
+#             where
+#                 B.pop_deviation < {self.pop_deviation_thresh}
+#             ) as C
+#         inner join
+#             {tbls['plans']} as D
+#         on
+#             C.random_seed = D.random_seed and C.plan = D.plan
+#         ) as E
+#     inner join
+#         {self.nodes_tbl} as F
+#     on
+#         E.geoid = F.geoid
+#     group by
+#         random_seed, plan, {self.district_type}
+#     ) as G
+# inner join
+#     {tbls['stats']} as H
+# on
+#     G.random_seed = H.random_seed and G.plan = H.plan and G.{self.district_type} = H.{self.district_type}
+# inner join
+#     {tbls['summaries']} as I
+# on
+#     H.random_seed = I.random_seed and H.plan = I.plan
+# inner join
+#     {tbls['params']} as J
+# on
+#     I.random_seed = J.random_seed
+# """ for random_seed, tbls in self.tbls.items()]
+#         self.join_tbl = f'{self.tbl}_join'
+#         self.join_temp_tbls = run_batches(self.join_query_list, tbl=self.join_tbl, run=True)
+
+#         print('stacking joined table batches')
+#         self.join_batch_stack = u.join([f'select * from {tbl}' for tbl in self.join_temp_tbls])
+#         self.stack_tbl = f'{self.tbl}_stack'
+#         load_table(tbl=self.tbl, query=self.join_batch_stack)
+#         for tbl in self.hash_temp_tbls:
+#             delete_table(tbl)
+#         for tbl in self.join_temp_tbls:
+#             delete_table(tbl)
