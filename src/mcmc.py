@@ -33,6 +33,7 @@ class MCMC(Base):
         self.pq = self.path / f'{self.name}.parquet'
         self.gpickle = self.pq.with_suffix('.gpickle')
         self.tbl = f'{self.ds}.{self.stem}_0000000_allresults'
+        self.hash_tbl = f'{self.tbl}_hash'
     
         try:
             bqclient.create_dataset(self.ds)
@@ -520,7 +521,6 @@ order by
     
     
     def post_process2(self):
-        self.hash_tbl = f'{self.tbl}_hash'
         rpt(f'Stacking summaries & uniquifying')
         u = '\nunion all\n'
         query = u.join([f'select * from {tbls["summaries"]}' for random_seed, tbls in self.tbls.items()])
