@@ -51,19 +51,8 @@ class MCMC(Base):
         self.districts = {k:set(v) for k,v in grp.groups.items()}
         grp = self.nodes_df.groupby('county')
         self.counties  = {k:set(v) for k,v in grp.groups.items()}
-
         self.total_pop  = self.nodes_df['total_pop'].sum()
         self.target_pop = self.total_pop / Seats[self.district_type]
-        self.step = 0
-        self.polsby_popper = 0
-        
-        self.get_graph()
-        self.get_defect()
-        self.get_stats()
-
-        self.defect_init = self.defect
-        self.defect_cap = int(self.defect_multiplier * self.defect_init)
-#         print(f'defect_init = {self.defect_init}, setting ceiling for mcmc of {self.defect_cap}')
 
 
     def get_graph(self):
@@ -280,6 +269,14 @@ order by
 
         
     def run_chain(self):
+        self.polsby_popper = 0
+        self.get_graph()
+        self.get_defect()
+        self.get_stats()
+        self.defect_init = self.defect
+        self.defect_cap = int(self.defect_multiplier * self.defect_init)
+#         print(f'defect_init = {self.defect_init}, setting ceiling for mcmc of {self.defect_cap}')
+        
         self.step = 0
         self.overwrite_tbl = True
         self.get_stats()
