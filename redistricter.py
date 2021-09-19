@@ -94,21 +94,21 @@ N = Nodes(**nodes_opts)
 from src.mcmc import *
 import multiprocessing
 
-if nodes_opts['district_type'] == 'cd'
-    mcmc['pop_deviation_target'] = 0.01,
-elif nodes_opts['district_type'] == 'sldu'
-    mcmc['pop_deviation_target'] = 10.0,
-elif nodes_opts['district_type'] == 'sldl'
-    mcmc['pop_deviation_target'] = 10.0,
-else
-    raise Exception(f'unknown district type {nodes_opts['district_type']}')
+if nodes_opts['district_type'] == 'cd':
+    mcmc_opts['pop_deviation_target'] = 0.01
+elif nodes_opts['district_type'] == 'sldu':
+    mcmc_opts['pop_deviation_target'] = 10.0
+elif nodes_opts['district_type'] == 'sldl':
+    mcmc_opts['pop_deviation_target'] = 10.0
+else:
+    raise Exception(f'unknown district type {nodes_opts["district_type"]}')
     
 mcmc_opts['nodes_tbl'] = N.tbl
     
-for opt in ['max_steps', 'pop_diff_exp', 'report_period']:
+for opt in ['max_steps', 'pop_diff_exp', 'report_period', 'yolo_length']:
     mcmc_opts[opt] = int(mcmc_opts[opt])
 
-for opt in ['pop_deviation_target', 'anneal', 'defect_multiplier']:
+for opt in ['pop_deviation_target', 'defect_multiplier']:
     mcmc_opts[opt] = float(mcmc_opts[opt])
     
 mcmc_opts['pop_deviation_stop'] = bool(mcmc_opts['pop_deviation_stop'])

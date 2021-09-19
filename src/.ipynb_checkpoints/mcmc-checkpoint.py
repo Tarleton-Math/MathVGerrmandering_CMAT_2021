@@ -443,7 +443,9 @@ order by
 
                             for n in comp[0]:
                                 self.graph.nodes[n][self.district_type] = d0  # relabel nodes
-                                self.adj.add_edge(self.graph.nodes[n]['county'], self.graph.nodes[n][self.district_type])  # add edge in self.adj between this node's new district & county
+                                # add edge in self.adj between this node's new district & county
+                                self.adj.add_edge(self.graph.nodes[n]['county'], self.graph.nodes[n][self.district_type])
+                                
                             for n in comp[1]:
                                 self.graph.nodes[n][self.district_type] = d1
                                 self.adj.add_edge(self.graph.nodes[n]['county'], self.graph.nodes[n][self.district_type])
@@ -473,18 +475,18 @@ order by
                         
                          # if we've seen that plan recently, reject and try again
                         self.get_hash()
-                        duplicate = self.hash in self.hash_rec[-self.yolo_length:]
+                        if self.hash in self.hash_rec[-self.yolo_length:]:
                             reject(comp)
                             self.get_hash()
                             continue
 
                         # if defect exceeds cap, reject and try again
                         self.get_defect()
-                            if self.defect > self.defect_cap:
-                                reject(comp)
-                                self.get_hash()
-                                self.get_defect()
-                                continue
+                        if self.defect > self.defect_cap:
+                            reject(comp)
+                            self.get_hash()
+                            self.get_defect()
+                            continue
 
                         self.get_stats()
                         assert abs(self.pop_deviation - pop_deviation_new) < 1e-2, f'disagreement betwen pop_deviation calculations {self.pop_deviation} v {pop_deviation_new}'
