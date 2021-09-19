@@ -3,33 +3,38 @@ from . import *
 @dataclasses.dataclass
 class MCMC(Base):
     nodes_tbl             : str
+    pop_deviation_target  : float
     max_steps             : int = 0
     random_seed           : int = 0
     pop_diff_exp          : int = 2
-    pop_deviation_target  : float = 10.0
     pop_deviation_stop    : bool = False
     defect_multiplier     : float = 1.0
-    anneal                : float = 0.0
+    yolo_length           : int = 5
     save                  : bool = True
     save_period           : int = 500
-    report_period         : int = 500
+    report_period         : int = 50
     edge_attrs            : typing.Tuple = ('distance', 'shared_perim')
     node_attrs            : typing.Tuple = ('total_pop', 'aland', 'perim')
-    max_results           : int = None
-    batch_size            : int = 100
     postprocess_thresh    : float = 10.0
 
 
     def __post_init__(self):
         self.start_time = time.time()
+        
+        # extract info from nodes_tbl
         w = self.nodes_tbl.split('.')[-1].split('_')[1:]
         try:
             self.abbr, self.yr, self.level, self.district_type, self.contract_thresh = w
         except:
             self.abbr, self.yr, self.level, self.district_type = w
+        self.seat_shares = f'seats_{self.district_type}'
         self.stem = '_'.join(w)
         self.name = f'{self.stem}_{self.random_seed}'
+        # initialize random number generator
+        self.random_seed = int(self.random_seed)
+        self.rng = np.random.default_rng(self.random_seed)
 
+        # get file and BigQuery names
         self.ds = f'{root_bq}.{self.stem}'
         self.bq = self.ds + f'.{self.name}'
         self.path = root_path / f'results/{self.stem}'
@@ -38,19 +43,17 @@ class MCMC(Base):
         self.tbl = f'{self.ds}.{self.stem}_0000000_allresults'
         self.hash_tbl = f'{self.tbl}_hash'
     
+        # create tables & paths
         try:
             bqclient.create_dataset(self.ds)
         except:
             pass
         self.path.mkdir(parents=True, exist_ok=True)
         
-        self.random_seed = int(self.random_seed)
-        self.rng = np.random.default_rng(self.random_seed)
-        self.seats_col = f'seats_{self.district_type}'
 
 
     def get_graph(self):
-#         rpt(f'getting edges')
+        # find adjacent nodes
         query = f"""
 select
     *
@@ -76,7 +79,8 @@ order by
         self.graph = nx.from_pandas_edgelist(self.edges, source=f'geoid_x', target=f'geoid_y', edge_attr=self.edge_attrs)
         nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
 
-#         print(f'connecting districts')
+        # Check for connected districts & fix if needed
+        # This is rare, but can 
         connected = False
         while not connected:
             connected = True
@@ -84,34 +88,43 @@ order by
                 comp = self.get_components_district(d)
 #                 rpt(f"District {self.district_type} {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}")
                 if len(comp) > 1:
+                    # district disconnected - keep largest component and "dissolve" smaller ones into other contiguous districts.
+                    # May create population deviation which will be corrected during MCMC.
 #                     print('regrouping to connect components')
                     connected = False
                     for c in comp[1:]:
                         for x in c:
-                            y = self.rng.choice(list(self.graph.neighbors(x)))
-                            self.graph.nodes[x][self.district_type] = self.graph.nodes[y][self.district_type]
+                            y = self.rng.choice(list(self.graph.neighbors(x)))  # chose a random neighbor
+                            self.graph.nodes[x][self.district_type] = self.graph.nodes[y][self.district_type]  # adopt its district
 
+        # Create new districts starting points at the most populous nodes
         new_districts = Seats[self.district_type] - len(self.districts)
         new_district_starts = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
-        del self.nodes_df
+        # Past this point, only data stored in self.graph is available to the algorithm,
+        # thus EXCLUDING any election, racial, or demographic data.
+        # Deleting self.node_df is an optional extra step to further demonstrate that the
+        # algorithm CAN NOT see election, racial, or demographic data.
+        del self.nodes_df  
 
         d_new = max(self.districts.keys()) + 1
         while new_districts > 0:
+            # get most populous remaining node, make it a new district, and
+            # check if this disconnected its old district.  If so, undo and try next node.
             n = new_district_starts.pop(0)
-#             rpt(f'try to start district {M} at node {n}')
             d_old = self.graph.nodes[n][self.district_type]
             self.graph.nodes[n][self.district_type] = d_new
             comp = self.get_components_district(d_old)
             if len(comp) == 1:
-#                 rpt('success')
+                # success
                 self.districts[d_new] = set([n])
                 self.districts[d_old].remove(n)
                 d_new += 1
                 new_districts -= 1
             else:
-#                 rpt('fail')
+                # fail - disconnected old district - undo and try again
                 self.graph.nodes[n][self.district_type] = d_old
     
+        # Create the county-district adjacency graph.
         self.adj = nx.Graph()
         for n, data in self.graph.nodes(data=True):
             d = data[self.district_type]
@@ -125,7 +138,7 @@ order by
             
             c = data['county']
             self.adj.add_node(c)
-            for k in ['total_pop', self.seats_col]:
+            for k in ['total_pop', self.seat_shares]:
                 try:
                     self.adj.nodes[c][k] += data[k]
                 except:
@@ -134,8 +147,8 @@ order by
             self.adj.add_edge(c, d)
         
         for c in self.counties:
-            self.adj.nodes[c]['whole_target']     = int(np.floor(self.adj.nodes[c][self.seats_col]))
-            self.adj.nodes[c]['intersect_target'] = int(np.ceil (self.adj.nodes[c][self.seats_col]))
+            self.adj.nodes[c]['whole_target']     = int(np.floor(self.adj.nodes[c][self.seat_shares]))
+            self.adj.nodes[c]['intersect_target'] = int(np.ceil (self.adj.nodes[c][self.seat_shares]))
 
 
     def graph_to_df(self, G=None):
@@ -160,45 +173,37 @@ order by
         self.hash = self.partition.__hash__()
         return self.hash
 
-    def get_stats(self, return_df=False, districts=None):
-        if districts is None:
-            districts = self.districts.keys()
-        D = self.districts.keys() - districts
-        if len(D) > 0:
-            dev_max = max(x for n, x in self.adj.nodes(data='pop_deviation') if n in D)
-            dev_min = min(x for n, x in self.adj.nodes(data='pop_deviation') if n in D)
-        else:
-            dev_max = 0
-            dev_min = 10000
-            
+    def get_stats(self):
         attrs = ['total_pop', 'aland', 'perim']
-        for d in districts:
+        for d in self.districts.keys():
             for a in attrs:
                 self.adj.nodes[d][a] = 0
             self.adj.nodes[d]['internal_perim'] = 0
         
         for n, data_node in self.graph.nodes(data=True):
             d = data_node[self.district_type]
-            if d in districts:
-                for a in attrs:
-                    self.adj.nodes[d][a] += data_node[a]
+            for a in attrs:
+                self.adj.nodes[d][a] += data_node[a]
 
         for u, v, data_edge in self.graph.edges(data=True):
             d = self.graph.nodes[u][self.district_type]
-            if d in districts:
-                if self.graph.nodes[v][self.district_type] == d:
-                    self.adj.nodes[d]['internal_perim'] += 2 * data_edge['shared_perim']
+            if self.graph.nodes[v][self.district_type] == d:
+                self.adj.nodes[d]['internal_perim'] += 2 * data_edge['shared_perim']
 
-        for d in districts:
+        dev_max = -10000
+        dev_min =  10000
+        self.polsby_popper = 0
+        for d in self.districts.keys():
             stats = self.adj.nodes[d]
-            self.polsby_popper -= stats['polsby_popper']
             stats['external_perim'] = stats['perim'] - stats['internal_perim']
             stats['polsby_popper'] = 4 * np.pi * stats['aland'] / (stats['external_perim']**2) * 100
             self.polsby_popper += stats['polsby_popper']
+            
             stats['pop_deviation'] = (stats['total_pop'] - self.target_pop) / self.target_pop * 100
             dev_max = max(dev_max, stats['pop_deviation'])
             dev_min = min(dev_min, stats['pop_deviation'])
         self.pop_deviation = abs(dev_max) + abs(dev_min)
+        self.polsby_popper /= len(self.districts.keys())
 
 
     def get_stats_df(self):
@@ -265,8 +270,11 @@ order by
     def run_chain(self):
         self.polsby_popper = 0
         
-        self.node_attrs = listify(self.node_attrs) + [self.district_type]
-        self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.seats_col] + list(self.node_attrs)).set_index('geoid')
+        # The only data available to the algorithm are geoid, county, seat_shares, current district assignment,
+        # and columns in self.node_attrs (which are total_pop, aland, and perim by default).
+        # This EXCLUDES any election, racial, or demographic data.
+        self.node_attrs = [self.district_type] + listify(self.node_attrs)
+        self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.seat_shares] + list(self.node_attrs)).set_index('geoid')
         
         grp = self.nodes_df.groupby(self.district_type)
         self.districts = {k:set(v) for k,v in grp.groups.items()}
@@ -355,20 +363,26 @@ order by
         
 
     def recomb(self):
+        # Make backups - used to undo rejected steps
         self.graph_backup = self.graph.copy()
         self.adj_backup   = self.adj.copy()
         self.districts_backup = self.districts.copy()
+        
+        # Make generator to yield district pairs in random order weighted by population difference ... yields pairs with large pop difference first to encourage convergence to population balance
         def gen(pop_diff):
             while len(pop_diff) > 0:
-                pop_diff /= pop_diff.sum()
-                a = self.rng.choice(pop_diff.index, p=pop_diff)
+                pop_diff /= pop_diff.sum()  # make pop_diff a probability vector
+                a = self.rng.choice(pop_diff.index, p=pop_diff)  # yield from remaining pairs with prefence for larger population difference
                 pop_diff.pop(a)
                 yield a
                 
         Q = self.get_stats_df()['total_pop']
+        # Make dataframe of district pairs with pop_difference raise to the parameter self.pop_diff_exp
         pop_diff = pd.DataFrame([(x, y, abs(p-q)) for x, p in Q.iteritems() for y, q in Q.iteritems() if x < y]).set_index([0,1]).squeeze()
         pop_diff = pop_diff ** self.pop_diff_exp
         pairs = gen(pop_diff)
+        
+        
         while True:
             try:
                 d0, d1 = next(pairs)
@@ -377,97 +391,101 @@ order by
                 return False
             except Exception as e:
                 raise Exception(f'unknown error {e}')
-            H = nx.subgraph_view(self.graph, lambda n: self.graph.nodes[n][self.district_type] in [d0, d1])
-            
+
+            H = nx.subgraph_view(self.graph, lambda n: self.graph.nodes[n][self.district_type] in [d0, d1])  # get subgraph on districts d0 and d1
             if not nx.is_connected(H):  # if H is not connect, go to next district pair
-#                     rpt(f'{d0},{d1} not connected')
                 continue
-#                 else:
-#                     rpt(f'{d0},{d1} connected')
+
             P  = Q.copy()
             p0 = P.pop(d0)
             p1 = P.pop(d1)
             q  = p0 + p1
+            P_min, P_max = P.min(), P.max()
             # q is population of d0 & d1
             # P lists all OTHER district populations
-            P_min, P_max = P.min(), P.max()
+            # So P_min & P_max are the min & max population of all districts except d0 & d1
 
             trees = []  # track which spanning trees we've tried so we don't repeat failures
-            for i in range(100):  # max number of spanning trees to try
+            for i in range(100):  # max number of spanning trees to try before going to next district pair
+                # We want a random spanning tree, but networkx can only deterministically find a MINIMUM spanning tree (Kruskal's algorithm).
+                # So, we first assign random weights to the edges then find MINIMUM spanning tree based on those random weights
+                # thus producing a random spanning tree.
                 for e in self.edges_tuple(H):
                     H.edges[e]['weight'] = self.rng.uniform()
-                T = nx.minimum_spanning_tree(H)  # find minimum spanning tree - we assiged random weights so this is really a random spanning tress
-                h = self.edges_tuple(T).__hash__()  # hash tree for comparion
+                T = nx.minimum_spanning_tree(H)  
+                h = self.edges_tuple(T).__hash__()  # store T's hash so we avoid trying it again later if it fails
                 if h not in trees:  # prevents retrying a previously failed treee
                     trees.append(h)
-                    # try to make search more efficient by searching for a suitable cut edge among edges with high betweenness-centrality
-                    # Since cutting an edge near the perimeter of the tree is veru unlikely to produce population balance,
+                    # Make search for good edge cut with population balance more efficient by looking at edges with high betweenness-centrality.
+                    # Since cutting an edge near the leaves of the tree is very unlikely to produce population balance,
                     # we focus on edges near the center.  Betweenness-centrality is a good metric for this.
                     B = nx.edge_betweenness_centrality(T)
                     B = sorted(B.items(), key=lambda x:x[1], reverse=True)  # sort edges on betweenness-centrality (largest first)
-                    for e, cent in B:
-                        if cent < 0.01:
+                    for e, bw_centrality in B:
+                        if bw_centrality < 0.01: # We exhausted all good edges - move on to next tree
                             break
                         T.remove_edge(*e)
                         comp = nx.connected_components(T)  # T nows has 2 components
-                        next(comp)  # second one tends to be smaller → faster to sum over → skip over the first component
-                        s = sum(H.nodes[n]['total_pop'] for n in next(comp))  # sum population in component 2
-                        t = q - s  # pop of component 0 (recall q is the combined pop of d0&d1)
+                        next(comp)  # second component tends to be smaller → faster to sum over
+                        s = sum(H.nodes[n]['total_pop'] for n in next(comp))  # sum population in second component 
+                        t = q - s  # population in first component (recall q is the combined population of d0 & d1)
                         if s > t:  # ensure s < t
                             s, t = t, s
-                        pop_deviation_new = (abs(max(t, P_max) - self.target_pop) + abs(min(s, P_min) - self.target_pop)) / self.target_pop * 100  # compute new pop deviation
+                            
+                        pop_deviation_min = abs(min(s, P_min) - self.target_pop)
+                        pop_deviation_max = abs(max(t, P_max) - self.target_pop)
+                        pop_deviation_new = (pop_deviation_min + pop_deviation_max) / self.target_pop * 100  # new pop deviation
                         
-                        def accept(comp):
-                            for d, c in zip([d0,d1], comp):
-                                self.districts[d] = set(c).copy()
-                                self.adj.remove_edges_from([(d, n) for n in self.adj[d]])
+                        def update(comp):
+                            for d, c in [[d0, comp[0]], [d1, comp[1]]]:
+                                self.districts[d] = set(c).copy()  # store nodes in comp into self.districts
+                                self.adj.remove_edges_from([(d, n) for n in self.adj[d]])  # cut all edges of self.adj touching d0 or d1
 
                             for n in comp[0]:
-                                self.graph.nodes[n][self.district_type] = d0
-                                self.adj.add_edge(self.graph.nodes[n]['county'], self.graph.nodes[n][self.district_type])
+                                self.graph.nodes[n][self.district_type] = d0  # relabel nodes
+                                self.adj.add_edge(self.graph.nodes[n]['county'], self.graph.nodes[n][self.district_type])  # add edge in self.adj between this node's new district & county
                             for n in comp[1]:
                                 self.graph.nodes[n][self.district_type] = d1
                                 self.adj.add_edge(self.graph.nodes[n]['county'], self.graph.nodes[n][self.district_type])
-
-                            novel = self.get_hash() not in self.hash_rec[-5:]
-                            if not novel: # if we've already seen that plan before, reject and keep trying for a new one
-# #                             rpt(f'duplicate plan {self.hash}')
-                                reject(comp)
-                            return True
                             
                         def reject(comp):
-                            T.add_edge(*e)
-                            self.districts[d0] = self.districts_backup[d0].copy()
-                            self.districts[d1] = self.districts_backup[d1].copy()
-                            self.adj = self.adj_backup.copy()
-                            for n in comp[0] + comp[1]:
+                            T.add_edge(*e)  # restore e
+                            for d in [d0, d1]:
+                                self.districts[d] = self.districts_backup[d].copy()  # restore self.districts
+                            self.adj = self.adj_backup.copy()  # restore self.adj
+                            for n in comp[0] + comp[1]:  # restore labels
                                 self.graph.nodes[n][self.district_type] = self.graph_backup.nodes[n][self.district_type]
                         
                         comp = self.get_components(T)
+                        
+                        # Phase 1: If pop_deviation too high, reject steps that increase it
                         if self.pop_deviation > self.pop_deviation_target:
                             if pop_deviation_new > self.pop_deviation:
                                 T.add_edge(*e)
                                 continue
-                            else:
-                                if accept(comp):
-                                    self.get_defect()
-                                    if self.defect > self.defect_cap:
-                                        reject(comp)
-                                        self.get_defect()
-                                        continue
+                        # Phase 1: If pop_deviation within target range, reject steps that would leave target range
                         else:
                             if pop_deviation_new > self.pop_deviation_target:
                                 T.add_edge(*e)
                                 continue
-                            else:
-                                defect_old = self.defect
-                                if accept(comp):
-                                    self.get_defect()
-                                    if self.defect > self.defect_init:
-                                        if self.defect > defect_old:
-                                            reject(comp)
-                                            self.get_defect()
-                                            continue
+
+                        update(comp)
+                        
+                         # if we've seen that plan recently, reject and try again
+                        self.get_hash()
+                        duplicate = self.hash in self.hash_rec[-self.yolo_length:]
+                            reject(comp)
+                            self.get_hash()
+                            continue
+
+                        # if defect exceeds cap, reject and try again
+                        self.get_defect()
+                            if self.defect > self.defect_cap:
+                                reject(comp)
+                                self.get_hash()
+                                self.get_defect()
+                                continue
+
                         self.get_stats()
                         assert abs(self.pop_deviation - pop_deviation_new) < 1e-2, f'disagreement betwen pop_deviation calculations {self.pop_deviation} v {pop_deviation_new}'
 
@@ -490,24 +508,6 @@ order by
                         return True
 
                     
-    def run_batches(self, query_list, batch_size, tbl):
-        temp_tbls = list()
-        k = 0
-        while query_list:
-            query = query_list.pop()
-            try:
-                query_stack = query_stack + u + query
-            except:
-                query_stack = query
-            if len(query_list) % batch_size == 0:
-                temp_tbls.append(f'{tbl}_{k}')
-                load_table(tbl=temp_tbls[-1], query=query_stack)
-                rpt(f'{len(query_list)} remain')
-                del query_stack
-                k += 1
-        return temp_tbls
-
-
     def post_process1(self):    
         self.tbls = dict()
         for src_tbl in bqclient.list_tables(self.ds, max_results=self.max_results):
@@ -627,6 +627,71 @@ on
         rpt('stacking combined tables')
         query = u.join([f'select * from {tbls[combined]} where pop_deviation_plan < {self.postprocess_thresh}' for random_seed, tbls in self.tbls.items()])
         load_table(tbl=self.tbl, query=query)
+
+
+
+###################################################################################################
+################### Code below is old working code preserved for reference only ###################
+###################################################################################################
+        
+#     def get_stats(self, return_df=False, districts=None):
+#         if districts is None:
+#             districts = self.districts.keys()
+#         D = self.districts.keys() - districts
+#         if len(D) > 0:
+#             dev_max = max(x for n, x in self.adj.nodes(data='pop_deviation') if n in D)
+#             dev_min = min(x for n, x in self.adj.nodes(data='pop_deviation') if n in D)
+#         else:
+#             dev_max = 0
+#             dev_min = 10000
+            
+#         attrs = ['total_pop', 'aland', 'perim']
+#         for d in districts:
+#             for a in attrs:
+#                 self.adj.nodes[d][a] = 0
+#             self.adj.nodes[d]['internal_perim'] = 0
+        
+#         for n, data_node in self.graph.nodes(data=True):
+#             d = data_node[self.district_type]
+#             if d in districts:
+#                 for a in attrs:
+#                     self.adj.nodes[d][a] += data_node[a]
+
+#         for u, v, data_edge in self.graph.edges(data=True):
+#             d = self.graph.nodes[u][self.district_type]
+#             if d in districts:
+#                 if self.graph.nodes[v][self.district_type] == d:
+#                     self.adj.nodes[d]['internal_perim'] += 2 * data_edge['shared_perim']
+
+#         for d in districts:
+#             stats = self.adj.nodes[d]
+#             self.polsby_popper -= stats['polsby_popper']
+#             stats['external_perim'] = stats['perim'] - stats['internal_perim']
+#             stats['polsby_popper'] = 4 * np.pi * stats['aland'] / (stats['external_perim']**2) * 100
+#             self.polsby_popper += stats['polsby_popper']
+#             stats['pop_deviation'] = (stats['total_pop'] - self.target_pop) / self.target_pop * 100
+#             dev_max = max(dev_max, stats['pop_deviation'])
+#             dev_min = min(dev_min, stats['pop_deviation'])
+#         self.pop_deviation = abs(dev_max) + abs(dev_min)
+
+        
+        
+#     def run_batches(self, query_list, batch_size, tbl):
+#         temp_tbls = list()
+#         k = 0
+#         while query_list:
+#             query = query_list.pop()
+#             try:
+#                 query_stack = query_stack + u + query
+#             except:
+#                 query_stack = query
+#             if len(query_list) % batch_size == 0:
+#                 temp_tbls.append(f'{tbl}_{k}')
+#                 load_table(tbl=temp_tbls[-1], query=query_stack)
+#                 rpt(f'{len(query_list)} remain')
+#                 del query_stack
+#                 k += 1
+#         return temp_tbls
 
 
 

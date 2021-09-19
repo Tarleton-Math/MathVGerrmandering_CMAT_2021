@@ -35,27 +35,26 @@ except:
 from src.nodes import *
 
 nodes_opts = {
-    'abbr'             : 'TX',
-    'level'            : 'cntyvtd',
-    'district_type'    : 'sldl',
+    'district_type'    : 'sldu',
     'contract_thresh'  : 10,
+    'level'            : 'cntyvtd',
+    'abbr'             : 'TX',
 }
     
 mcmc_opts = {
     'max_steps'             : 10000000,
     'pop_diff_exp'          : 2,
     'defect_multiplier'     : 1.0,
-    'anneal'                : 0,
-    'pop_deviation_target'  : 10.0,
+    'yolo_length'           : 5,
     'pop_deviation_stop'    : False,
     'report_period'         : 25,
     'save_period'           : 500,
 }
 
 run_opts = {
-    'seed_start'      : 2000000,
-    'jobs_per_worker' : 4,
-    'workers'         : 16,
+    'seed_start'      : 4000000,
+    'jobs_per_worker' : 1,
+    'workers'         : 80,
 }
 
 if not skip_inputs:
@@ -95,6 +94,15 @@ N = Nodes(**nodes_opts)
 from src.mcmc import *
 import multiprocessing
 
+if nodes_opts['district_type'] == 'cd'
+    mcmc['pop_deviation_target'] = 0.01,
+elif nodes_opts['district_type'] == 'sldu'
+    mcmc['pop_deviation_target'] = 10.0,
+elif nodes_opts['district_type'] == 'sldl'
+    mcmc['pop_deviation_target'] = 10.0,
+else
+    raise Exception(f'unknown district type {nodes_opts['district_type']}')
+    
 mcmc_opts['nodes_tbl'] = N.tbl
     
 for opt in ['max_steps', 'pop_diff_exp', 'report_period']:
@@ -108,15 +116,12 @@ mcmc_opts['pop_deviation_stop'] = bool(mcmc_opts['pop_deviation_stop'])
 for opt in ['seed_start', 'jobs_per_worker', 'workers']:
     run_opts[opt] = int(run_opts[opt])
 
-    
-
 if os.getenv('PYTHONHASHSEED') == HASHSEED:
     mcmc_opts['save'] = True
     print(f'hashseed == {HASHSEED} so results are ARE reproducible and WILL be saved to BigQuery')
 else:
     mcmc_opts['save'] = False
     print(f'hashseed != {HASHSEED} so results are NOT reproducible and will NOT be saved to BigQuery')
-
 
 def f(random_seed):
     M = MCMC(random_seed=random_seed, **mcmc_opts)
