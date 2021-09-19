@@ -321,6 +321,7 @@ order by
         self.defect_init = self.defect
         self.defect_cap = int(self.defect_multiplier * self.defect_init)
 #         print(f'defect_init = {self.defect_init}, setting ceiling for mcmc of {self.defect_cap}')
+        self.report()
     
     
     def run_chain(self):

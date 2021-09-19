@@ -221,15 +221,15 @@ from (
         from (
             select
                 *,
-                case when A_county   >= (max(A_county)   over (partition by geoid_new)) then county else NULL end as county_new,
                 case when A_district >= (max(A_district) over (partition by geoid_new)) then {self.district_type} else NULL end as district_new,
+                --case when A_county >= (max(A_county) over (partition by geoid_new)) then county else NULL end as county_new
             from (
                 select
                     A.geoid_new,
                     A.{self.district_type},
                     B.* except ({self.district_type}),
-                    sum(total_pop) over (partition by geoid_new, county) as A_county,
                     sum(total_pop) over (partition by geoid_new, A.{self.district_type}) as A_district,
+                    --sum(total_pop) over (partition by geoid_new, county) as A_county,
                 from (
                     {subquery(query_temp, 5)}
                     ) as A
