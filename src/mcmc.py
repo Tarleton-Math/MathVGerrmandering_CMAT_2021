@@ -305,6 +305,7 @@ order by
         # and columns in self.node_attrs (which are total_pop, aland, and perim by default).
         # This EXCLUDES any election, racial, or demographic data.
         self.node_attrs = [self.district_type] + listify(self.node_attrs)
+        print(f'reading {self.nodes_tbl}')
         self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.seat_shares] + list(self.node_attrs)).set_index('geoid')
         
         grp = self.nodes_df.groupby(self.district_type)

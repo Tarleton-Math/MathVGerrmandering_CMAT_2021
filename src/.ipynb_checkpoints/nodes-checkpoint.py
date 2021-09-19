@@ -107,10 +107,13 @@ on
             self.assignments.tbl = assign_orig + f'_{self.district_type}_{self.proposal.lower()}'
             assign_temp = self.assignments.tbl + f'_temp'
             if not check_table(self.assignments.tbl):
-                self.df = pd.read_csv(self.assignments.path / f'{self.district_type}/{self.proposal}.csv')
+                file = f'{self.proposal}.csv'
+                rpt(f'loading {file} into {assign_temp}')
+                self.df = pd.read_csv(self.assignments.path / f'{self.district_type}/{file}')
                 self.df.columns = ['geoid', self.district_type]
-                self.df = self.df.astype({'geoid':str, self.district_type:int})
+                self.df = self.df.astype({'geoid':str, self.district_type:str})
                 load_table(tbl=assign_temp, df=self.df)
+                rpt(f'creating {self.assignments.tbl}')
                 query = f"""
 select
     A.* except ({self.district_type}),
@@ -127,16 +130,16 @@ on
         
         
         if self.level in ['tabblock', 'bg', 'tract', 'cnty']:
-            lev = f'substring({self.level}, 3) as level'
+            lev = f'substring({self.level}, 3)'
         else:
-            lev = f'{self.level} as level'
+            lev = self.level
 
             query_temp = f"""
 select
     A.geoid,
     A.cnty,
     A.{self.seats_share},
-    A.{lev},
+    A.{lev} as level,
     B.{self.district_type},
 from
     {self.raw} as A
@@ -146,19 +149,15 @@ on
     A.geoid = B.geoid
 """
 
-            
-#             query_temp = f"select geoid, cnty, {self.district_type}, {self.seats_share}, substring({self.level}, 3) as level from {self.raw}"
-#         else:
-#             query_temp = f"select geoid, cnty, {self.district_type}, {self.seats_share},           {self.level}     as level from {self.raw}"
-        
         if self.contract_thresh == 0:
             query_temp = f"""
 select
     geoid,
     level as geoid_new,
     {self.district_type}
-from
-    ({query_temp})
+from (
+    {subquery(query_temp, indents=1)}
+    )
 """
     
         elif self.contract_thresh == 2010:
@@ -174,8 +173,9 @@ from (
         {self.district_type},
         cnty,
         count(distinct {self.district_type}) over (partition by cnty) as ct,
-    from
-        ({query_temp})
+    from (
+        {subquery(query_temp, indents=2)}
+        )
     )
 """
         else:
@@ -191,11 +191,11 @@ from (
         {self.district_type},
         cnty,
         sum({self.seats_share}) over (partition by cnty) as seats,
-    from
-        ({query_temp})
+    from (
+        {subquery(query_temp, indents=2)}
+        )
     )
 """
-
 
         floats = ['total_pop_prop', 'seats_cd', 'seats_sldu', 'seats_sldl']
         sels = [f'sum({c}) as {c}' for c in floats] + [f'cast(round(sum({c})) as int) as {c}' for c in self.cols['census'] + self.cols['elections'] if c not in floats]
@@ -221,13 +221,14 @@ from (
         from (
             select
                 *,
-                case when A_county   >= (max(A_county)   over (partition by geoid_new)) then county               else NULL end as county_new,
+                case when A_county   >= (max(A_county)   over (partition by geoid_new)) then county else NULL end as county_new,
                 case when A_district >= (max(A_district) over (partition by geoid_new)) then {self.district_type} else NULL end as district_new,
             from (
                 select
                     A.geoid_new,
-                    B.*,
-                    sum(total_pop) over (partition by geoid_new, county)                 as A_county,
+                    A.{self.district_type},
+                    B.* except ({self.district_type}),
+                    sum(total_pop) over (partition by geoid_new, county) as A_county,
                     sum(total_pop) over (partition by geoid_new, A.{self.district_type}) as A_district,
                 from (
                     {subquery(query_temp, 5)}
