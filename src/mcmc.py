@@ -463,10 +463,11 @@ order by
                                 defect_old = self.defect
                                 if accept(comp):
                                     self.get_defect()
-                                    if self.defect > defect_old:
-                                        reject(comp)
-                                        self.get_defect()
-                                        continue
+                                    if self.defect > self.defect_init
+                                        if self.defect > defect_old:
+                                            reject(comp)
+                                            self.get_defect()
+                                            continue
                         self.get_stats()
                         assert abs(self.pop_deviation - pop_deviation_new) < 1e-2, f'disagreement betwen pop_deviation calculations {self.pop_deviation} v {pop_deviation_new}'
 
