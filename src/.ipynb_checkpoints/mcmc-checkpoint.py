@@ -80,7 +80,7 @@ order by
         nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
 
         # Check for connected districts & fix if needed
-        # This is rare, but can 
+        # This is rare, but can potentially happen during county-node contraction.
         connected = False
         while not connected:
             connected = True
