@@ -51,7 +51,7 @@ class Nodes(Variable):
 
         self.tbl += f'_{self.district_type}_contract{self.contract_thresh}'
         self.pq = self.tbl_to_file().with_suffix('.parquet')
-        self.seats_col = f'seats_{self.district_type}'
+        self.seats_share = f'seats_{self.district_type}'
         self.cols = {'assignments': Levels + District_types,
                      'shapes'     : ['aland', 'polygon'],
                      'census'     : ['total_pop_prop', 'seats_cd', 'seats_sldu', 'seats_sldl'] + Census_columns['data'],
@@ -60,31 +60,7 @@ class Nodes(Variable):
 
         if self.proposal != '':
             self.tbl = self.tbl + f'_{self.proposal.lower()}'
-            if not check_table(self.tbl):
-                rpt(f'creating assignment table for proposal {self.proposal}')
-                self.df = pd.read_csv(self.assignments.path / f'{self.district_type}/{self.proposal}.csv')
-                self.proposal = self.proposal.lower()
-                self.df.columns = ['geoid', self.district_type]
-                self.df = self.df.astype({'geoid':str, self.district_type:int})
-                assign_orig = self.assignments.tbl
-                assign_temp = assign_orig + f'_temp'
-                assign_prop = assign_orig + f'_{self.district_type}_{self.proposal}'
-                load_table(tbl=assign_temp, df=self.df)
-                query = f"""
-select
-    A.* except ({self.district_type}),
-    B.{self.district_type}
-from
-    {assign_orig} as A
-full outer join
-    {assign_temp} as B
-on
-    A.geoid = B.geoid
-"""
-                load_table(tbl=assign_prop, query=query)
-                delete_table(assign_temp)
-                print(f'success')
-
+            
         exists = super().get()
         if not exists['tbl']:
             if not exists['raw']:
@@ -126,16 +102,61 @@ on
 
 
     def process(self):
+        if self.proposal != '':
+            assign_orig = self.assignments.tbl
+            self.assignments.tbl = assign_orig + f'_{self.district_type}_{self.proposal.lower()}'
+            assign_temp = self.assignments.tbl + f'_temp'
+            if not check_table(self.assignments.tbl):
+                self.df = pd.read_csv(self.assignments.path / f'{self.district_type}/{self.proposal}.csv')
+                self.df.columns = ['geoid', self.district_type]
+                self.df = self.df.astype({'geoid':str, self.district_type:int})
+                load_table(tbl=assign_temp, df=self.df)
+                query = f"""
+select
+    A.* except ({self.district_type}),
+    B.{self.district_type}
+from
+    {assign_orig} as A
+full outer join
+    {assign_temp} as B
+on
+    A.geoid = B.geoid
+"""
+                load_table(tbl=self.assignments.tbl, query=query)
+                delete_table(assign_temp)
+        
+        
         if self.level in ['tabblock', 'bg', 'tract', 'cnty']:
-            query_temp = f"select geoid, cnty, {self.district_type}, {self.seats_col}, substring({self.level}, 3) as level from {self.raw}"
+            lev = f'substring({self.level}, 3) as level'
         else:
-            query_temp = f"select geoid, cnty, {self.district_type}, {self.seats_col},           {self.level}     as level from {self.raw}"
+            lev = f'{self.level} as level'
+
+            query_temp = f"""
+select
+    A.geoid,
+    A.cnty,
+    A.{self.seats_share},
+    A.{lev},
+    B.{self.district_type},
+from
+    {self.raw} as A
+inner join
+    {self.assignments.tbl} as B
+on
+    A.geoid = B.geoid
+"""
+
+            
+#             query_temp = f"select geoid, cnty, {self.district_type}, {self.seats_share}, substring({self.level}, 3) as level from {self.raw}"
+#         else:
+#             query_temp = f"select geoid, cnty, {self.district_type}, {self.seats_share},           {self.level}     as level from {self.raw}"
         
         if self.contract_thresh == 0:
             query_temp = f"""
 select
     geoid,
     level as geoid_new,
+    {self.district_type}
 from
     ({query_temp})
 """
@@ -144,11 +165,13 @@ from
             query_temp = f"""
 select
     geoid,
-    case when ct = 1 then substring(cnty, 3) else level end as geoid_new
+    case when ct = 1 then substring(cnty, 3) else level end as geoid_new,
+    {self.district_type}
 from (
     select
         geoid,
         level,
+        {self.district_type},
         cnty,
         count(distinct {self.district_type}) over (partition by cnty) as ct,
     from
@@ -159,13 +182,15 @@ from (
             query_temp = f"""
 select
     geoid,
-    case when 10 * seats < {self.contract_thresh} then substring(cnty, 3) else level end as geoid_new
+    case when 10 * seats < {self.contract_thresh} then substring(cnty, 3) else level end as geoid_new,
+    {self.district_type}
 from (
     select
         geoid,
         level,
+        {self.district_type},
         cnty,
-        sum({self.seats_col}) over (partition by cnty) as seats,
+        sum({self.seats_share}) over (partition by cnty) as seats,
     from
         ({query_temp})
     )
@@ -202,8 +227,8 @@ from (
                 select
                     A.geoid_new,
                     B.*,
-                    sum(total_pop) over (partition by geoid_new, county)               as A_county,
-                    sum(total_pop) over (partition by geoid_new, {self.district_type}) as A_district,
+                    sum(total_pop) over (partition by geoid_new, county)                 as A_county,
+                    sum(total_pop) over (partition by geoid_new, A.{self.district_type}) as A_district,
                 from (
                     {subquery(query_temp, 5)}
                     ) as A
