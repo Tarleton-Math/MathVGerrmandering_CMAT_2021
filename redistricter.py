@@ -36,7 +36,7 @@ from src.nodes import *
 
 nodes_opts = {
     'district_type'    : 'sldu',
-#     'proposal'         : 'PLANS2101',
+    'proposal'         : 'PLANS2101',
     'contract_thresh'  : 10,
     'level'            : 'cntyvtd',
     'abbr'             : 'TX',
@@ -53,7 +53,7 @@ mcmc_opts = {
 }
 
 run_opts = {
-    'seed_start'      : 4000000,
+    'seed_start'      : 1000000,
     'jobs_per_worker' : 1,
     'workers'         : 80,
 }

@@ -59,16 +59,16 @@ class Nodes(Variable):
                     }
 
         if self.proposal != '':
-            self.df = pd.read_csv(self.assignments.path / f'{self.district_type}/{self.proposal}.csv')
-            self.df.columns = ['geoid', self.district_type]
-            self.df = self.df.astype({'geoid':str, self.district_type:int})
-            self.proposal = self.proposal.lower()
-            assign_orig = self.assignments.tbl
-            assign_temp = assign_orig + f'_temp'
-            assign_prop = assign_orig + f'_{self.district_type}_{self.proposal}'
-            self.tbl = self.tbl + f'_{self.proposal}'
+            self.tbl = self.tbl + f'_{self.proposal.lower()}'
             if not check_table(self.tbl):
                 rpt(f'creating assignment table for proposal {self.proposal}')
+                self.df = pd.read_csv(self.assignments.path / f'{self.district_type}/{self.proposal}.csv')
+                self.proposal = self.proposal.lower()
+                self.df.columns = ['geoid', self.district_type]
+                self.df = self.df.astype({'geoid':str, self.district_type:int})
+                assign_orig = self.assignments.tbl
+                assign_temp = assign_orig + f'_temp'
+                assign_prop = assign_orig + f'_{self.district_type}_{self.proposal}'
                 load_table(tbl=assign_temp, df=self.df)
                 query = f"""
 select
