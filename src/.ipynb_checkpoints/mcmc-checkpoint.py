@@ -305,7 +305,6 @@ order by
         # and columns in self.node_attrs (which are total_pop, aland, and perim by default).
         # This EXCLUDES any election, racial, or demographic data.
         self.node_attrs = [self.district_type] + listify(self.node_attrs)
-        print(f'reading {self.nodes_tbl}')
         self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.seat_shares] + list(self.node_attrs)).set_index('geoid')
         
         grp = self.nodes_df.groupby(self.district_type)
@@ -360,11 +359,6 @@ order by
         r = f'{self.pq.stem}_step_{self.step}'
         graph_gpickle = self.pq.parent / f'{r}_graph.gpickle'
         adj_gpickle   = self.pq.parent / f'{r}_adj.gpickle'
-#         print()
-#         print(graph_gpickle)
-#         print()
-#         print(adj_gpickle)
-#         assert 1==2
         nx.write_gpickle(self.graph, graph_gpickle)
         nx.write_gpickle(self.adj  , adj_gpickle)
         to_gcs(graph_gpickle)
