@@ -463,7 +463,7 @@ order by
                                 defect_old = self.defect
                                 if accept(comp):
                                     self.get_defect()
-                                    if self.defect > self.defect_init
+                                    if self.defect > self.defect_init:
                                         if self.defect > defect_old:
                                             reject(comp)
                                             self.get_defect()
