@@ -319,7 +319,8 @@ order by
         self.get_stats()
         self.save_graph()
         self.defect_init = self.defect
-        self.defect_cap = int(self.defect_multiplier * self.defect_init)
+#         self.defect_cap = int(self.defect_multiplier * self.defect_init)
+        self.defect_cap = Defect_Cap[self.district_type]
 #         print(f'defect_init = {self.defect_init}, setting ceiling for mcmc of {self.defect_cap}')
         self.report()
     
@@ -505,7 +506,7 @@ order by
                             if pop_deviation_new > self.pop_deviation:
                                 T.add_edge(*e)
                                 continue
-                        # Phase 1: If pop_deviation within target range, reject steps that would leave target range
+                        # Phase 2: If pop_deviation within target range, reject steps that would leave target range
                         else:
                             if pop_deviation_new > self.pop_deviation_target:
                                 T.add_edge(*e)
@@ -521,8 +522,9 @@ order by
                             continue
 
                         # if defect exceeds cap, reject and try again
+                        old_defect = self.defect
                         self.get_defect()
-                        if self.defect > self.defect_cap:
+                        if self.defect > self.defect_cap and self.defect > old_defect:
                             reject(comp)
                             self.get_hash()
                             self.get_defect()

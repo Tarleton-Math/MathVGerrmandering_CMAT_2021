@@ -33,6 +33,7 @@ gcs_bucket = gcsclient.get_bucket(gcs_path)
 Levels = ['cntyvtd', 'tabblock', 'bg', 'tract', 'cnty']
 District_types = ['cd', 'sldu', 'sldl']
 Seats = {'cd':38, 'sldu':31, 'sldl':150}
+Defect_Cap = {'cd':47, 'sldu':26, 'sldl':19}
 Years = [2010, 2020]
 concat_str = ' ... '
 meters_per_mile = 1609.344
