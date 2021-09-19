@@ -99,9 +99,9 @@ on
 
     def process(self):
         if self.level in ['tabblock', 'bg', 'tract', 'cnty']:
-            query_temp = f"select geoid, cnty, {self.seats_col}, substring({self.level}, 3) as level from {self.raw}"
+            query_temp = f"select geoid, cnty, {self.district_type}, {self.seats_col}, substring({self.level}, 3) as level from {self.raw}"
         else:
-            query_temp = f"select geoid, cnty, {self.seats_col},           {self.level}     as level from {self.raw}"
+            query_temp = f"select geoid, cnty, {self.district_type}, {self.seats_col},           {self.level}     as level from {self.raw}"
         
         if self.contract_thresh == 0:
             query_temp = f"""
