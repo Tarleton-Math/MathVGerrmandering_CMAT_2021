@@ -14,6 +14,7 @@ class Nodes(Variable):
     level             : str = 'cntyvtd'
     district_type     : str = 'cd'
     contract_thresh   : int = 0
+    proposal          : str = ''
     refresh_tbl       : typing.Tuple = ()
     refresh_all       : typing.Tuple = ()
     election_filters  : typing.Tuple = (
@@ -47,7 +48,7 @@ class Nodes(Variable):
         self.shapes        = Shapes(n=self)
         self.census        = Census(n=self)
         self.elections     = Elections(n=self)
-        
+
         self.tbl += f'_{self.district_type}_contract{self.contract_thresh}'
         self.pq = self.tbl_to_file().with_suffix('.parquet')
         self.seats_col = f'seats_{self.district_type}'
@@ -56,6 +57,33 @@ class Nodes(Variable):
                      'census'     : ['total_pop_prop', 'seats_cd', 'seats_sldu', 'seats_sldl'] + Census_columns['data'],
                      'elections'  : [c for c in get_cols(self.elections.tbl) if c not in ['geoid', 'county']]
                     }
+
+        if self.proposal != '':
+            self.df = pd.read_csv(self.assignments.path / f'{self.district_type}/{self.proposal}.csv')
+            self.df.columns = ['geoid', self.district_type]
+            self.df = self.df.astype({'geoid':str, self.district_type:int})
+            self.proposal = self.proposal.lower()
+            assign_orig = self.assignments.tbl
+            assign_temp = assign_orig + f'_temp'
+            assign_prop = assign_orig + f'_{self.district_type}_{self.proposal}'
+            self.tbl = self.tbl + f'_{self.proposal}'
+            if not check_table(self.tbl):
+                rpt(f'creating assignment table for proposal {self.proposal}')
+                load_table(tbl=assign_temp, df=self.df)
+                query = f"""
+select
+    A.* except ({self.district_type}),
+    B.{self.district_type}
+from
+    {assign_orig} as A
+full outer join
+    {assign_temp} as B
+on
+    A.geoid = B.geoid
+"""
+                load_table(tbl=assign_prop, query=query)
+                delete_table(assign_temp)
+                print(f'success')
 
         exists = super().get()
         if not exists['tbl']:

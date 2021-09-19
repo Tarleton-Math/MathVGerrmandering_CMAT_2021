@@ -3,7 +3,7 @@ from . import *
 @dataclasses.dataclass
 class MCMC(Base):
     nodes_tbl             : str
-    pop_deviation_target  : float
+    pop_deviation_target  : float = 10.0
     max_steps             : int = 0
     random_seed           : int = 0
     pop_diff_exp          : int = 2
@@ -24,9 +24,9 @@ class MCMC(Base):
         # extract info from nodes_tbl
         w = self.nodes_tbl.split('.')[-1].split('_')[1:]
         try:
-            self.abbr, self.yr, self.level, self.district_type, self.contract_thresh = w
+            self.abbr, self.yr, self.level, self.district_type, self.contract_thresh = w[:5]
         except:
-            self.abbr, self.yr, self.level, self.district_type = w
+            self.abbr, self.yr, self.level, self.district_type = w[:4]
         self.seat_shares = f'seats_{self.district_type}'
         self.stem = '_'.join(w)
         self.name = f'{self.stem}_{self.random_seed}'
@@ -39,7 +39,6 @@ class MCMC(Base):
         self.bq = self.ds + f'.{self.name}'
         self.path = root_path / f'results/{self.stem}'
         self.pq = self.path / f'{self.name}.parquet'
-        self.gpickle = self.pq.with_suffix('.gpickle')
         self.tbl = f'{self.ds}.{self.stem}_0000000_allresults'
         self.hash_tbl = f'{self.tbl}_hash'
     
@@ -298,8 +297,9 @@ order by
         print(f'random_seed {self.random_seed}: step {self.step} {time_formatter(time.time() - self.start_time)}, pop_deviation={self.pop_deviation:.1f}, intersect_defect={self.intersect_defect}, whole_defect={self.whole_defect}', flush=True)
 
         
-    def run_chain(self):
+    def init_chain(self):
         self.polsby_popper = 0
+        self.step = 0
         
         # The only data available to the algorithm are geoid, county, seat_shares, current district assignment,
         # and columns in self.node_attrs (which are total_pop, aland, and perim by default).
@@ -317,13 +317,15 @@ order by
         self.get_graph()
         self.get_defect()
         self.get_stats()
+        self.save_graph()
         self.defect_init = self.defect
         self.defect_cap = int(self.defect_multiplier * self.defect_init)
 #         print(f'defect_init = {self.defect_init}, setting ceiling for mcmc of {self.defect_cap}')
-        
-        self.step = 0
+    
+    
+    def run_chain(self):
+        self.init_chain()
         self.overwrite_tbl = True
-        self.get_stats()
         self.plans_rec     = [self.get_plan_df()]
         self.defect_rec    = [self.get_defect_df()]
         self.stats_rec     = [self.get_stats_df()]
@@ -332,7 +334,6 @@ order by
         for k in range(1, self.max_steps+1):
             self.step = k
             msg = f"random_seed {self.random_seed} step {self.step} pop_deviation={self.pop_deviation:.1f}"
-
             if self.recomb():
                 self.plans_rec    .append(self.get_plan_df())
                 self.defect_rec   .append(self.get_defect_df())
@@ -349,16 +350,28 @@ order by
             else:
                 rpt(msg)
                 break
-        
         self.save_results()
         self.report()
         print(f'random_seed {self.random_seed} done')
 
 
+    def save_graph(self):
+        r = f'{self.pq.stem}_step_{self.step}'
+        graph_gpickle = self.pq.parent / f'{r}_graph.gpickle'
+        adj_gpickle   = self.pq.parent / f'{r}_adj.gpickle'
+#         print()
+#         print(graph_gpickle)
+#         print()
+#         print(adj_gpickle)
+#         assert 1==2
+        nx.write_gpickle(self.graph, graph_gpickle)
+        nx.write_gpickle(self.adj  , adj_gpickle)
+        to_gcs(graph_gpickle)
+        to_gcs(adj_gpickle)
+    
+    
     def save_results(self):
-        nx.write_gpickle(self.graph, self.gpickle)
-        to_gcs(self.gpickle)
-        
+        self.save_graph()
         def reorder(df):
             idx = [c for c in ['random_seed', 'step'] if c in df.columns]
             return df[idx + [c for c in df.columns if c not in idx]].rename(columns={'step':'plan'})
@@ -370,7 +383,7 @@ order by
             self.stats_rec     = pd.concat(self.stats_rec    , axis=0).rename_axis(self.district_type).reset_index()
             self.summaries_rec = pd.concat(self.summaries_rec, axis=0)
             self.params_rec    = pd.DataFrame()
-            for p in ['random_seed', 'max_steps', 'pop_diff_exp', 'defect_multiplier', 'anneal', 'pop_deviation_target', 'pop_deviation_stop', 'report_period', 'save_period']:
+            for p in ['random_seed', 'max_steps', 'pop_diff_exp', 'defect_multiplier', 'pop_deviation_target', 'pop_deviation_stop', 'report_period', 'save_period']:
                 self.params_rec[p] = [self[p]]
 
             for nm, tbl in tbls.items():

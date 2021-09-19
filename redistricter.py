@@ -36,6 +36,7 @@ from src.nodes import *
 
 nodes_opts = {
     'district_type'    : 'sldu',
+#     'proposal'         : 'PLANS2101',
     'contract_thresh'  : 10,
     'level'            : 'cntyvtd',
     'abbr'             : 'TX',
