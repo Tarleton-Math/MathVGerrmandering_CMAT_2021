@@ -100,8 +100,9 @@ order by
         # Create new districts starting points at the most populous nodes
         new_districts = Seats[self.district_type] - len(self.districts)
         new_district_starts = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
-        # Past this point, only data stored in self.graph is available to the algorithm,
-        # thus EXCLUDING any election, racial, or demographic data.
+        
+        # By deleting self.nodes_df, we further ensure that only data explicitly stored in self.graph is available to the algorithm.
+        # hus EXCLUDING any election, racial, or demographic data.
         # Deleting self.node_df is an optional extra step to further demonstrate that the
         # algorithm CAN NOT see election, racial, or demographic data.
         del self.nodes_df  
