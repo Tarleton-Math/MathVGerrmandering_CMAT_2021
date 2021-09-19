@@ -102,9 +102,8 @@ order by
         new_district_starts = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
         
         # By deleting self.nodes_df, we further ensure that only data explicitly stored in self.graph is available to the algorithm.
-        # hus EXCLUDING any election, racial, or demographic data.
-        # Deleting self.node_df is an optional extra step to further demonstrate that the
-        # algorithm CAN NOT see election, racial, or demographic data.
+        # This EXCLUDES any election, racial, or demographic data.
+        # The algorithm CAN NOT see election, racial, or demographic data.
         del self.nodes_df  
 
         d_new = max(self.districts.keys()) + 1
@@ -125,34 +124,40 @@ order by
                 # fail - disconnected old district - undo and try again
                 self.graph.nodes[n][self.district_type] = d_old
     
-        # Create the county-district adjacency graph.
+        
+        # Create the county-district bi-partite adjacency graph.
+        # This graph has 1 node for each county and district &
+        # an edge for all (county, district) that intersect (share land).
+        # It is an efficient tool to track map defect and other properties.
         self.adj = nx.Graph()
         for n, data in self.graph.nodes(data=True):
             d = data[self.district_type]
-            self.adj.add_node(d)
+            self.adj.add_node(d)  # adds district node if not already present
             self.adj.nodes[d]['polsby_popper'] = 0
             for k in ['total_pop', 'aland', 'perim']:
                 try:
-                    self.adj.nodes[d][k] += data[k]
+                    self.adj.nodes[d][k] += data[k]  # add to attribute if exists
                 except:
-                    self.adj.nodes[d][k] = data[k]
+                    self.adj.nodes[d][k] = data[k]  # else create attribute
             
             c = data['county']
-            self.adj.add_node(c)
+            self.adj.add_node(c)  # adds county node if not already present
             for k in ['total_pop', self.seat_shares]:
                 try:
-                    self.adj.nodes[c][k] += data[k]
+                    self.adj.nodes[c][k] += data[k]  # add to attribute if exists
                 except:
-                    self.adj.nodes[c][k] = data[k]
+                    self.adj.nodes[c][k] = data[k]  # else create attribute
             
-            self.adj.add_edge(c, d)
+            self.adj.add_edge(c, d)  # create edge
         
+        # See "get_defect" for explanation
         for c in self.counties:
             self.adj.nodes[c]['whole_target']     = int(np.floor(self.adj.nodes[c][self.seat_shares]))
             self.adj.nodes[c]['intersect_target'] = int(np.ceil (self.adj.nodes[c][self.seat_shares]))
 
 
     def graph_to_df(self, G=None):
+        # create dataframe from graph for storage and display
         if G is None:
             G = self.adj
         df = pd.DataFrame.from_dict(dict(G.nodes(data=True)), orient='index')
@@ -161,53 +166,71 @@ order by
         return df
 
     def get_components(self, H):
+        # get and sorted connected components by size
         return sorted([tuple(x) for x in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
 
     def district_view(self, district):
+        # get subgraph of a given district
         return nx.subgraph_view(self.graph, lambda n: self.graph.nodes[n][self.district_type] == district)
 
     def get_components_district(self, district):
+        # get connected components of a district
         return self.get_components(self.district_view(district))
 
     def get_hash(self):
+        # partition hashing provides a unique integer label for each distinct plan
+        # For each district, get sorted tuple of nodes it contains.  Then sort these tuples.
+        # Produces a sorted tuple of sorted tuples called "partition" that does not care about:
+        # permutations of the nodes within a district OR
+        # permutations of the district labels
         self.partition = tuple(sorted(tuple(sorted(v)) for v in self.districts.values()))
+        # use python hash to convert into integer.  Note that redistricter.py ensures the same
+        # FIXED HASHSEED so this hash is reproducible across runs and can be used to remove
+        # duplications in different runs.
         self.hash = self.partition.__hash__()
         return self.hash
 
     def get_stats(self):
+        # compute district stats & store in self.adj
+        # initialize to 0
         attrs = ['total_pop', 'aland', 'perim']
         for d in self.districts.keys():
             for a in attrs:
                 self.adj.nodes[d][a] = 0
             self.adj.nodes[d]['internal_perim'] = 0
         
+        # iterate over nodes in self.graph and increment corresponding district node in self.adj
         for n, data_node in self.graph.nodes(data=True):
             d = data_node[self.district_type]
             for a in attrs:
                 self.adj.nodes[d][a] += data_node[a]
 
+        # iterate over edges in self.graph and increment corresponding district node in self.adj
         for u, v, data_edge in self.graph.edges(data=True):
             d = self.graph.nodes[u][self.district_type]
-            if self.graph.nodes[v][self.district_type] == d:
-                self.adj.nodes[d]['internal_perim'] += 2 * data_edge['shared_perim']
+            if self.graph.nodes[v][self.district_type] == d: # if u & v in same district, (u, v) is an internal edge
+                self.adj.nodes[d]['internal_perim'] += 2 * data_edge['shared_perim']  # must double because this boundary piece counts in perim for BOTH u & v
 
-        dev_max = -10000
         dev_min =  10000
+        dev_max = -10000
         self.polsby_popper = 0
         for d in self.districts.keys():
             stats = self.adj.nodes[d]
+            # computer external_perim & polsby-popper (aland, perim, & internal perim computed in prior loops)
             stats['external_perim'] = stats['perim'] - stats['internal_perim']
             stats['polsby_popper'] = 4 * np.pi * stats['aland'] / (stats['external_perim']**2) * 100
             self.polsby_popper += stats['polsby_popper']
             
+            # compute pop_deivations and update dev_min & dev_max
             stats['pop_deviation'] = (stats['total_pop'] - self.target_pop) / self.target_pop * 100
-            dev_max = max(dev_max, stats['pop_deviation'])
             dev_min = min(dev_min, stats['pop_deviation'])
+            dev_max = max(dev_max, stats['pop_deviation'])
         self.pop_deviation = abs(dev_max) + abs(dev_min)
         self.polsby_popper /= len(self.districts.keys())
 
 
     def get_stats_df(self):
+        # converts stats to dataframe for display and storage
         self.get_stats()
         H = self.adj.subgraph(self.districts.keys())
         self.stats_df = self.graph_to_df(H)
@@ -215,6 +238,13 @@ order by
 
 
     def get_defect(self):
+        # The "county-line" rule prefers minimal county & district splitting. We implement as follows:
+        # seats_share = county population / distrinct ideal population
+        # Ideally, county should wholly contain floor(seats_share) and intersect ceiling(seats_share) districts
+        # Ex: County seats_share=2.4, so it should ideally wholly contain 2 districts and intersect a 3rd.
+        # whole_defect = |actual wholly contained - floor(seats_share)|
+        # intersect_defect = |actual intersected - ceil(seats_share)|
+        # defect = whole_defect + intersect_defect
         self.intersect_defect = 0
         self.whole_defect = 0
         self.defect = 0
