@@ -216,10 +216,12 @@ class Variable(Base):
             tbl = self.tbl
         return self.path / tbl.split('.')[-1]
         
-    def save_tbl(self):
+    def save_tbl(self, tbl=None):
+        if tbl is None:
+            tbl = self.tbl
         rpt(f'saving table')
         rpt('reading')
-        self.df = read_table(tbl=self.tbl)
+        self.df = read_table(tbl=tbl)
         rpt('to parquet')
         self.df.to_parquet(self.pq)
 #         rpt('to csv')
