@@ -117,7 +117,8 @@ on
                 query = f"""
 select
     A.* except ({self.district_type}),
-    B.{self.district_type}
+    A.{self.district_type} as {self.district_type}_2010,
+    B.{self.district_type} as {self.district_type}_proposed
 from
     {assign_orig} as A
 full outer join
@@ -130,16 +131,16 @@ on
         
         
         if self.level in ['tabblock', 'bg', 'tract', 'cnty']:
-            lev = f'substring({self.level}, 3)'
+            lev = f'substring(A.{self.level}, 3)'
         else:
-            lev = self.level
+            lev = f'A.{self.level}'
 
-            query_temp = f"""
+        query_temp = f"""
 select
     A.geoid,
     A.cnty,
     A.{self.seats_share},
-    A.{lev} as level,
+    {lev} as level,
     B.{self.district_type},
 from
     {self.raw} as A
@@ -154,7 +155,7 @@ on
 select
     geoid,
     level as geoid_new,
-    {self.district_type}
+    {self.district_type},
 from (
     {subquery(query_temp, indents=1)}
     )
@@ -165,7 +166,7 @@ from (
 select
     geoid,
     case when ct = 1 then substring(cnty, 3) else level end as geoid_new,
-    {self.district_type}
+    {self.district_type},
 from (
     select
         geoid,
@@ -214,22 +215,26 @@ from (
         select
             geoid_new as geoid,
             max(county_new) as county,
-            cast(max(district_new) as int) as {self.district_type},
+            max(vtd_new) as vtd,
+            max(district_new) as {self.district_type},
             {join_str(3).join(sels)},
             st_union_agg(polygon) as polygon,
             sum(aland) / {meters_per_mile**2} as aland
         from (
             select
                 *,
-                case when A_district >= (max(A_district) over (partition by geoid_new)) then {self.district_type} else NULL end as district_new,
-                --case when A_county >= (max(A_county) over (partition by geoid_new)) then county else NULL end as county_new
+                case when P_district >= (max(P_district) over (partition by geoid_new)) then {self.district_type} else NULL end as district_new,
+                case when P_county   >= (max(P_county)   over (partition by geoid_new)) then county else NULL end as county_new,
+                case when P_vtd      >= (max(P_vtd)      over (partition by geoid_new)) then vtd    else NULL end as vtd_new
             from (
                 select
                     A.geoid_new,
-                    A.{self.district_type},
+                    B.cntyvtd as vtd,
+                    cast(A.{self.district_type} as int) as {self.district_type},
                     B.* except ({self.district_type}),
-                    sum(total_pop) over (partition by geoid_new, A.{self.district_type}) as A_district,
-                    --sum(total_pop) over (partition by geoid_new, county) as A_county,
+                    sum(total_pop) over (partition by geoid_new, A.{self.district_type}) as P_district,
+                    sum(total_pop) over (partition by geoid_new, county) as P_county,
+                    sum(total_pop) over (partition by geoid_new, B.cntyvtd) as P_vtd,
                 from (
                     {subquery(query_temp, 5)}
                     ) as A

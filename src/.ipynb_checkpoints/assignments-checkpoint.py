@@ -37,10 +37,14 @@ class Assignments(Variable):
                 os.unlink(fn)
         self.df = lower(pd.concat(L, axis=1).reset_index()).sort_values('geoid')
         c = self.df['geoid'].str
-        self.df.insert(1, 'state'   , c[:2])
-        self.df.insert(1, 'cnty'    , c[:5])
-        self.df.insert(1, 'tract'   , c[:11])
-        self.df.insert(1, 'bg'      , c[:12])
-        self.df.insert(1, 'tabblock', c[:15])
+        self.df['state']    = c[:2]
+        self.df['cnty']     = c[:5]
+        self.df['tract']    = c[:11]
+        self.df['bg']       = c[:12]
+        self.df['tabblock'] = c[:15]
+        self.df['cd_prop']   = self.df['cd']
+        self.df['sldu_prop'] = self.df['sldu']
+        self.df['sldl_prop'] = self.df['sldl']
+        self.df = self.df[['geoid', 'tabblock', 'bg', 'tract', 'cnty', 'cntyvtd', 'cd', 'cd_prop', 'sldu', 'sldu_prop', 'sldl', 'sldl_prop']]
         load_table(tbl=self.tbl, df=self.df, preview_rows=0)
         self.save_tbl()
