@@ -7,322 +7,41 @@ def extract_file(zipfile, fn, **kwargs):
 
 @dataclasses.dataclass
 class Data(Base):
-    refresh_tbl       : typing.Set = default_set()
-    refresh_all       : typing.Set = default_set()
     election_filters  : typing.Tuple = (
         "office='USSen' and race='general'",
         "office='President' and race='general'",
         "office like 'USRep%' and race='general'")
         
     def __post_init__(self):
-        self.refresh_all = setify(self.refresh_all)
-        self.refresh_tbl = setify(self.refresh_tbl).union(setify(self.refresh_all))
-        if len(self.refresh_tbl) > 0:
-            self.refresh_tbl.add('all')
+        self.Sources = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'joined')
         super().__post_init__()
-        
+        if len(self.refresh_tbl) > 0:
+            self.refresh_tbl.add('joined')
+
         self.tbl  = dict()
-        self.zp   = dict()
         self.pq   = dict()
+        self.zp   = dict()
         self.path = dict()
         for src in self.Sources:
-            stem = f'{src}_{self.state.abbr}_{self.census_yr}'
+            stem = f'{self.state.abbr}_{self.census_yr}_source_{src}'
             self.tbl [src] = f'{data_bq}.{stem}'
-            self.zp  [src] = data_path / f'{src}/{stem}.zip'
-            self.pq  [src] = self.zp[src].with_suffix('.parquet')
-            self.path[src] = self.zp[src].parent
-        
-        
-        for f in [self.get_crosswalks, self.get_assignments, self.get_shapes, self.get_census, self.get_elections, self.join]:
-            f()
+            self.pq  [src] = data_path / f'{src}/{self.state.abbr}/{stem}.parquet'
+            self.zp  [src] = self.pq[src].with_suffix('.zip')
+            self.path[src] = self.pq[src].parent
+
+        for src in self.Sources:
+            rpt(f'Get {src}'.ljust(rpt_just, ' '))
+            self.delete_for_refresh(src)
+            self[f'get_{src}']()
             print(f'success!')
             os.chdir(code_path)
-#         self.join()
-#         self.get_nodes()
-        
 
 #####################################################################################################
 #####################################################################################################
-#     def get_nodes(self):
-#         # Builds a deeply nested SQL query to generate nodes table
-#         # Query is returned, but not run by this function because it takes a while
-#         # and I got really pissed off by accidentally running it and waiting forever.
-
-#         # We build the query one level of nesting at a time store the "cumulative query" at each step
-#         query = list()
-
-#         # Python builds the SQL query using f-strings.  If you haven't used f-string, they are f-ing amazing.
-#         # Get critical columns from nodes_raw
-#         # Note we keep a dedicated "cntyvtd_temp" even though typically level=cntyvtd
-#         # so that, when we run with level<>cntyvtd, we still have access to ctnyvtd via ctnyvtd_temp
-#         self.seats = f'seats_{self.district_type}'
-#         query.append(f"""
-# select
-#     geoid,
-#     {self.level},
-#     cast({self.district_type} as int) as district_2010,
-#     substring(cnty,3) as cnty,
-#     county,
-#     cntyvtd as cntyvtd_temp,
-#     {self.seats} as seats,
-# from
-#     {self.tbl['all']}
-# """)
-
-
-#     # Joins the proposal's table is given.  Else, uses the 2010 districts.
-#     if self.proposal != '':
-#         proposal_tbl = f'{dataset}.{proposal}'
-#         cols = get_cols(proposal_tbl)
-#         query.append(f"""
-# select
-#     A.*,
-#     cast(B.{cols[1]} as int) as district,
-# from (
-#     {subquery(query[-1])}
-#     ) as A
-# inner join
-#     {proposal_tbl} as B
-# on
-#     A.geoid = cast(B.{cols[0]} as string)""")
-
-#     else:
-#         query.append(f"""
-# select
-#     A.*,
-#     A.district_2010 as district,
-# from (
-#     {subquery(query[-1], indents=1)}
-#     ) as A""")
-
-
-#     # Nodes_raw is at the census block level, but our MCMC usually runs at the cntyvtd level
-#     # So, we already need one round of contraction to combined all blocks in a cntyvtd into a single node.
-#     # However, we may want a second round of contraction combining all cntyvtds in a "small" county into a single node.
-#     # Here are several options for this second contraction, which I'll call "county contraction".
-    
-#     # No county contraction
-#     if contract == 0:
-#         query.append(f"""
-# select
-#     geoid,
-#     {level} as geoid_new,
-#     district,
-#     county,
-#     cntyvtd_temp as cntyvtd,
-#     seats,
-# from (
-#     {subquery(query[-1])}
-#     )""")
-
-#     # Contract county iff it was wholly contained in a single district in 2010
-#     elif contract == 2010:
-#         query.append(f"""
-# select
-#     geoid,
-#     case when ct = 1 then cnty else {level} end as geoid_new,
-#     district,
-#     county,
-#     cntyvtd_temp as cntyvtd,
-#     seats,
-# from (
-#     select
-#         geoid,
-#         {level},
-#         district,
-#         cnty,
-#         county,
-#         cntyvtd_temp,
-#         seats,
-#         count(distinct district_2010) over (partition by cnty) as ct,
-#     from (
-#         {subquery(query[-1])}
-#         )
-#     )""")
-        
-    
-#     # Contract county iff it is wholly contained in a single district in the proposed plan
-#     elif contract == 'proposal':
-#         query.append(f"""
-# select
-#     geoid,
-#     case when ct = 1 then cnty else {level} end as geoid_new,
-#     district,
-#     county,
-#     cntyvtd_temp as cntyvtd,
-#     seats,
-# from (
-#     select
-#         geoid,
-#         {level},
-#         district,
-#         cnty,
-#         county,
-#         cntyvtd_temp,
-#         seats,
-#         count(distinct district) over (partition by cnty) as ct,
-#     from (
-#         {subquery(query[-1], indents=2)}
-#         )
-#     )""")
-    
-    
-#     # Contract county iff its seats_share < contract / 10
-#     # seats_share = county pop / ideal district pop
-#     # ideal district pop = state pop / # districts
-#     # Note: contract = "tenths of a seat" rather than "seats" so that contract is an integer
-#     # Why? To avoid decimals in table & file names.  No other reason.
-#     else:
-#         query.append(f"""
-# select
-#     geoid,
-#     case when 10 * seats_temp < {contract} then cnty else {level} end as geoid_new,
-#     district,
-#     county,
-#     cntyvtd_temp as cntyvtd,
-#     seats,
-# from (
-#     select
-#         geoid,
-#         {level},
-#         district,
-#         cnty,
-#         county,
-#         cntyvtd_temp,
-#         seats,
-#         sum(seats) over (partition by cnty) as seats_temp,
-#     from (
-#         {subquery(query[-1], indents=2)}
-#         )
-#     )""")
-
-
-#     # Contraction leads to ambiguities.
-#     # Suppose some block of a cntyvtd are in county 1 while others are in county 2.
-#     # Or some blocks of a contracting county are in district A while others are in district B.
-#     # We will chose to assigned the contracted node to the county/district/cntyvtd that contains
-#     # the largest population of the contracting geographic unit unit.
-#     # Because we need seats for other purposes AND seats is proportional to total_pop,
-#     # it's equivalent and more convenient to implement this using seats in leiu of total_pop.
-#     # We must apply this tie-breaking rule to all categorical variables.
-    
-#     # First, find the total seats in each (geoid_new, unit) intersection
-#     query.append(f"""
-# select
-#     *,
-#     sum(seats) over (partition by geoid_new, district) as seats_district,
-#     sum(seats) over (partition by geoid_new, county  ) as seats_county,
-#     sum(seats) over (partition by geoid_new, cntyvtd ) as seats_cntyvtd,
-# from (
-#     {subquery(query[-1], indents=1)}
-#     )""")
-
-
-#     # Now, we find the max over all units in a given geoid
-#     query.append(f"""
-# select
-#     *,
-#     max(seats_district) over (partition by geoid_new) seats_district_max,
-#     max(seats_county  ) over (partition by geoid_new) seats_county_max,
-#     max(seats_cntyvtd ) over (partition by geoid_new) seats_cntyvtd_max,
-# from (
-#     {subquery(query[-1])}
-#     )""")
-    
-
-#     # Now, we create temporary columns that are null except on the rows of the unit achieving the max value found above
-#     # When we do the "big aggegration" below, max() will grab the name of the correct unit (one with max seat)
-#     query.append(f"""
-# select
-#     *,
-#     case when seats_district = seats_district_max then district else null end as district_new,
-#     case when seats_county   = seats_county_max   then county   else null end as county_new,
-#     case when seats_cntyvtd  = seats_cntyvtd_max  then cntyvtd  else null end as cntyvtd_new,
-# from (
-#     {subquery(query[-1])}
-#     )""")
-
-
-
-#     # Time for the big aggregration step.
-#     # Get names of the remaining data columns of nodes_raw
-#     cols = get_cols(raw_tbl)
-#     a = cols.index('total_pop_prop')
-#     b = cols.index('aland')
-#     # Create a list of sum statements for these columns to use in the select
-#     sels = ',\n    '.join([f'sum({c}) as {c}' for c in cols[a:b]])
-    
-#     # Join nodes_raw, groupby geoid_new, and aggregate categorical variable with max, numerical variables with sum,
-#     # and geospatial polygon with st_union_agg.
-#     query.append(f"""
-# select
-#     A.geoid_new as geoid,
-#     max(district_new) as district,
-#     max(county_new  ) as county,
-#     max(cntyvtd_new ) as cntyvtd,
-#     {sels},
-#     st_union_agg(polygon) as polygon,
-#     sum(aland) as aland
-# from (
-#     {subquery(query[-1])}
-#     ) as A
-# inner join
-#     {raw_tbl} as B
-# on
-#     A.geoid = B.geoid
-# group by
-#     geoid_new
-#     """)
-
-
-#     # Get polygon perimeter
-#     query.append(f"""
-# select
-#     *,
-#     st_perimeter(polygon) as perim,
-# from (
-#     {subquery(query[-1])}
-#     )""")
-
-
-#     # Compute density, polsby-popper, and centroid.
-#     query.append(f"""
-# select
-#     *,
-#     case when perim > 0 then round(4 * {np.pi} * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
-#     case when aland > 0 then total_pop / aland else 0 end as density,
-#     st_centroid(polygon) as point,
-# from (
-#     {subquery(query[-1])}
-#     )""")
-
-
-#     if show:
-#         for k, q in enumerate(query):
-#             print(f'\n\nquery {k}')
-#             print(q)
-    
-#     return query[-1]
-
-    
-    
-#####################################################################################################
-#####################################################################################################
-    
-
         
     def fetch(self, src, url):
-        rpt(f'Get {src}'.ljust(15, ' '))
         tbl, zp, pq, path = self.tbl[src], self.zp[src], self.pq[src], self.path[src]
-        
-        if src in self.refresh_tbl:
-            delete_table(tbl)
-        if src in self.refresh_all:
-            shutil.rmtree(path, ignore_errors=True)
-            for t in bqclient.list_tables(data_bq):
-                if src in t.table_id:
-                    delete_table(t.full_table_id.replace(':', '.'))
-        
+
         if check_table(tbl):
             rpt(f'using existing table')
             zipfile = False
@@ -350,9 +69,8 @@ class Data(Base):
 #####################################################################################################
 #####################################################################################################
     
-    def join(self):
-        src = 'all'
-        rpt(f'Joining'.ljust(15, ' '))
+    def get_joined(self):
+        src = 'joined'
         tbl, zp, pq, path = self.tbl[src], self.zp[src], self.pq[src], self.path[src]
         if check_table(tbl):
             rpt(f'using existing table')
@@ -419,7 +137,7 @@ on
                     df['election_yr'] = int(w[0])
                     df['race'] = '_'.join(w[1:-2])
                     L.append(df)
-                    os.unlink(fn)
+#                     os.unlink(fn)
 
     ######## vertically stack then clean so that joins work correctly later ########
             df = pd.concat(L, axis=0, ignore_index=True).reset_index(drop=True)
@@ -709,9 +427,8 @@ order by
                     break
                 else:
                     a += chunk_size
-            for fn in zipfile.namelist():
-                os.unlink(fn)
-
+#             for fn in zipfile.namelist():
+#                 os.unlink(fn)
 
         rpt(f'creating table')
         query = f"""
@@ -746,13 +463,16 @@ order by
             col = fn.lower().split('_')[-1][:-4]
             if fn[-3:] == 'txt' and col != 'aiannh':
                 df = extract_file(zipfile, fn, sep='|')
-                if col == 'vtd':
-                    df['countyfp'] = df['countyfp'].str.rjust(3, '0') + df['district'].str.rjust(6, '0')
-                    col = 'cntyvtd'
-                df = df.iloc[:,:2]
+                try:
+                    df['district'] = df['district'].astype(int)
+                except:
+                    if col == 'vtd':
+                        df['countyfp'] = df['countyfp'].str.rjust(3, '0') + df['district'].str.rjust(6, '0')
+                        df = df.iloc[:,:2]
+                        col = 'cntyvtd'
                 df.columns = ['geoid', col]
                 L.append(df.set_index('geoid'))
-                os.unlink(fn)
+#                 os.unlink(fn)
         df = lower(pd.concat(L, axis=1).reset_index()).sort_values('geoid')
         c = df['geoid'].str
         df['state']    = c[:2]
@@ -760,10 +480,11 @@ order by
         df['tract']    = c[:11]
         df['bg']       = c[:12]
         df['tabblock'] = c[:15]
-        df['cd_prop']   = df['cd']
-        df['sldu_prop'] = df['sldu']
-        df['sldl_prop'] = df['sldl']
-        df = df[['geoid', 'tabblock', 'bg', 'tract', 'cnty', 'cntyvtd', 'cd', 'cd_prop', 'sldu', 'sldu_prop', 'sldl', 'sldl_prop']]
+        df = df[['geoid', 'tabblock', 'bg', 'tract', 'cnty', 'cntyvtd', 'cd', 'sldu', 'sldl']]
+#         df['cd_prop']   = df['cd']
+#         df['sldu_prop'] = df['sldu']
+#         df['sldl_prop'] = df['sldl']
+#         df = df[['geoid', 'tabblock', 'bg', 'tract', 'cnty', 'cntyvtd', 'cd', 'cd_prop', 'sldu', 'sldu_prop', 'sldl', 'sldl_prop']]
         rpt(f'creating table')
         load_table(tbl, df=df, preview_rows=0)
 
@@ -784,7 +505,7 @@ order by
             for geoid in geoids:
                 yr = geoid[-4:]
                 df[geoid] = df[f'state_{yr}'].str.rjust(2,'0') + df[f'county_{yr}'].str.rjust(3,'0') + df[f'tract_{yr}'].str.rjust(6,'0') + df[f'blk_{yr}'].str.rjust(4,'0')
-            os.unlink(fn)
+#             os.unlink(fn)
         df['arealand_int'] = df['arealand_int'].astype(float)
         df['A'] = df.groupby(geoids[1])['arealand_int'].transform('sum')
         df['aland_prop'] = (df['arealand_int'] / df['A']).fillna(0)

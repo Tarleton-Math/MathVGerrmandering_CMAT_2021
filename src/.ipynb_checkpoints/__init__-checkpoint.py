@@ -41,6 +41,7 @@ crs_length = 'ESRI:102005'
 # meters_per_mile = 1609.344
 concat_str = ' ... '
 join_str   = ',\n    '
+rpt_just   = 20
 
 
 def listify(x=None):
@@ -66,26 +67,29 @@ def default_set(x=None):
 
 @dataclasses.dataclass
 class Base():
-    abbr           : str = 'TX'
-    shapes_yr      : int = 2020
-    census_yr      : int = 2020
-    level          : str = 'cntyvtd'
-    district_type  : str = 'cd'
-    contract_thresh: int = 0
-    proposal       : str = ''
-    seats          : typing.Dict  = default_factory({'cd':38, 'sldu':31, 'sldl':150})
-    Years          : typing.Tuple = (2020, 2010)
-    Levels         : typing.Tuple = ('cntyvtd', 'tabblock', 'bg', 'tract', 'cnty')
-    District_types : typing.Tuple = ('cd', 'sldu', 'sldl')
-    Sources        : typing.Tuple = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'all')
-        
+    abbr         : str = 'TX'
+    shapes_yr    : int = 2020
+    census_yr    : int = 2020
+    level        : str = 'cntyvtd'
+    district_type: str = 'cd'
+    seats        : typing.Dict  = default_factory({'cd':38, 'sldu':31, 'sldl':150})
+    refresh_tbl  : typing.Set = default_set()
+    refresh_all  : typing.Set = default_set()
+
     def __getitem__(self, key):
-        return self.__dict__[key]
+        return getattr(self, key)
 
     def __setitem__(self, key, val):
-        self.__dict__[key] = val
+        return setattr(self, key, val)
 
     def __post_init__(self):
+        self.Years          = (2020, 2010)
+        self.Levels         = ('cntyvtd', 'tabblock', 'bg', 'tract', 'cnty')
+        self.District_types = ('cd', 'sldu', 'sldl')
+        self.refresh_all = setify(self.refresh_all)
+        self.refresh_tbl = setify(self.refresh_tbl).union(setify(self.refresh_all))
+        self.state = states[states['abbr']==self.abbr].iloc[0]
+
         D = {'census_yr'    :self.Years,
              'shapes_yr'    :self.Years,
              'level'        :self.Levels,
@@ -99,8 +103,18 @@ class Base():
                 if len(d) > 0:
                     raise Exception(f'got unknown values {d} for {key} ... must be in {vals}')
 
-        self.state = states[states['abbr']==self.abbr].iloc[0]
-
+    def delete_for_refresh(self, src):
+        tbl = self.tbl[src]
+        if src in self.refresh_all:
+            shutil.rmtree(self.path[src], ignore_errors=True)
+            for t in bqclient.list_tables(data_bq):
+                nm = t.full_table_id.replace(':', '.')
+                if self.tbl[src] in nm:
+                    rpt(f'deleting {nm}')
+                    delete_table(nm)
+        if src in self.refresh_tbl:
+            rpt(f'deleting {tbl}')
+            delete_table(tbl)
 
 def rpt(msg):
     print(msg, end=concat_str, flush=True)
