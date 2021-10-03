@@ -135,6 +135,10 @@ def lower(df):
     else:
         return df
 
+def extract_file(zipfile, fn, **kwargs):
+    file = zipfile.extract(fn)
+    return lower_cols(pd.read_csv(file, dtype=str, **kwargs))
+
 def subquery(query, indents=1):
     s = '\n' + indents * '    '
     return query.strip().replace('\n', s)

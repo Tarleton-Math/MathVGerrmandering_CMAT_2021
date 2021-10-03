@@ -1,9 +1,5 @@
 from . import *
-import urllib, shapely.ops, zipfile as zf
-
-def extract_file(zipfile, fn, **kwargs):
-    file = zipfile.extract(fn)
-    return lower_cols(pd.read_csv(file, dtype=str, **kwargs))
+import urllib, zipfile as zf, shapely.ops
 
 @dataclasses.dataclass
 class Data(Base):
@@ -35,7 +31,7 @@ class Data(Base):
             self[f'get_{src}']()
             print(f'success!')
             os.chdir(code_path)
-
+            
 #####################################################################################################
 #####################################################################################################
         
