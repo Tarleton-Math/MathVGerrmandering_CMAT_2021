@@ -2,10 +2,9 @@ proj_id   = 'cmat-315920'
 root_path = '/home/jupyter/'
 gcs_path  = 'math_for_unbiased_maps_tx'
 
-import time, datetime, dataclasses, typing, os, pathlib, shutil, urllib
-import zipfile as zf, numpy as np, pandas as pd, geopandas as gpd, networkx as nx
-import matplotlib.pyplot as plt, plotly.express as px
-from shapely.ops import orient
+import os, pathlib, shutil, time, datetime, dataclasses, typing
+import numpy as np, pandas as pd, geopandas as gpd
+
 try:
     import google.cloud.bigquery, google.cloud.bigquery_storage
 except:
@@ -21,46 +20,91 @@ cred, proj = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-
 bqclient   = google.cloud.bigquery.Client(credentials=cred, project=proj)
 gcsclient  = google.cloud.storage .Client(credentials=cred, project=proj)
 
-root_path = pathlib.Path(root_path)
-code_path = pathlib.Path(os.getcwd())
-data_path = root_path / 'redistricting_data'
+root_path    = pathlib.Path(root_path)
+code_path    = root_path / 'MathVGerrmandering_CMAT_2021'
+data_path    = root_path / 'redistricting_data'
+results_path = root_path / 'redistricting_results'
 
 root_bq  = proj_id
 data_bq  = root_bq  + '.redistricting_data'
+results_bq  = root_bq  + '.redistricting_results'
+
 bqclient.create_dataset(data_bq , exists_ok=True)
 gcs_bucket = gcsclient.get_bucket(gcs_path)
 
-Levels = ['cntyvtd', 'tabblock', 'bg', 'tract', 'cnty']
-District_types = ['cd', 'sldu', 'sldl']
-Seats = {'cd':38, 'sldu':31, 'sldl':150}
-Defect_Cap = {'cd':47, 'sldu':26, 'sldl':19}
-Years = [2010, 2020]
-concat_str = ' ... '
-meters_per_mile = 1609.344
+
 # https://gis.stackexchange.com/questions/27702/what-is-the-srid-of-census-gov-shapefiles
 # crs_census = 'NAD83'
 crs_census = 'EPSG:4269'
 crs_area   = 'ESRI:102003'
 crs_length = 'ESRI:102005'
+# meters_per_mile = 1609.344
+concat_str = ' ... '
+join_str   = ',\n    '
 
-def to_gcs(file):
-    gcs_bucket.blob(str(file).replace(str(root_path)+'/', '')).upload_from_filename(file)
+
+def listify(x=None):
+    if x is None:
+        return []
+    elif isinstance(x, pd.core.frame.DataFrame):
+        x = x.to_dict('split')['data']
+    elif isinstance(x, (np.ndarray, pd.Series)):
+        x = x.tolist()
+    elif isinstance(x, (list, tuple, set)):
+        return list(x)
+    else:
+        return [x]
+
+def setify(x=None):
+    return set(listify(x))
+
+def default_factory(x=None):
+    return dataclasses.field(default_factory=lambda:x)
+
+def default_set(x=None):
+    return default_factory(setify(x))
+
+@dataclasses.dataclass
+class Base():
+    abbr           : str = 'TX'
+    shapes_yr      : int = 2020
+    census_yr      : int = 2020
+    level          : str = 'cntyvtd'
+    district_type  : str = 'cd'
+    contract_thresh: int = 0
+    proposal       : str = ''
+    seats          : typing.Dict  = default_factory({'cd':38, 'sldu':31, 'sldl':150})
+    Years          : typing.Tuple = (2020, 2010)
+    Levels         : typing.Tuple = ('cntyvtd', 'tabblock', 'bg', 'tract', 'cnty')
+    District_types : typing.Tuple = ('cd', 'sldu', 'sldl')
+    Sources        : typing.Tuple = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'all')
+        
+    def __getitem__(self, key):
+        return self.__dict__[key]
+
+    def __setitem__(self, key, val):
+        self.__dict__[key] = val
+
+    def __post_init__(self):
+        D = {'census_yr'    :self.Years,
+             'shapes_yr'    :self.Years,
+             'level'        :self.Levels,
+             'district_type':self.District_types,
+             'refresh_all'  :self.Sources,
+             'refresh_tbl'  :self.Sources,
+            }
+        for key, vals in D.items():
+            if hasattr(self, key):
+                d = setify(self[key]).difference(vals)
+                if len(d) > 0:
+                    raise Exception(f'got unknown values {d} for {key} ... must be in {vals}')
+
+        self.state = states[states['abbr']==self.abbr].iloc[0]
+
 
 def rpt(msg):
     print(msg, end=concat_str, flush=True)
-    
-def check_level(level):
-    assert level in Levels, f"level must be one of {Levels}, got {level}"
 
-def check_district_type(district_type):
-    assert district_type in District_types, f"district must be one of {District_types}, got {district_type}"
-
-def check_year(year):
-    assert year in Years, f"year must be one of {Years}, got {year}"
-
-def check_group(group):
-    assert group in Groups, f"group must be one of {Groups}, got {group}"
-    
 def lower_cols(df):
     df.rename(columns = {x:str(x).lower() for x in df.columns}, inplace=True)
     return df
@@ -77,26 +121,9 @@ def lower(df):
     else:
         return df
 
-def listify(x):
-    if x is None:
-        return []
-    elif isinstance(x, pd.core.frame.DataFrame):
-        x = x.to_dict('split')['data']
-    elif isinstance(x, (np.ndarray, pd.Series)):
-        x = x.tolist()
-    elif isinstance(x, (list, tuple, set)):
-        return list(x)
-    else:
-        return [x]
-
-def rjust(col):
-    c = col.astype(str)
-    d = c.apply(len).max()
-    return c.str.rjust(d, '0')
-    
-def extract_file(zipfile, fn, **kwargs):
-    file = zipfile.extract(fn)
-    return lower_cols(pd.read_csv(file, dtype=str, **kwargs))
+def subquery(query, indents=1):
+    s = '\n' + indents * '    '
+    return query.strip().replace('\n', s)
 
 def check_table(tbl):
     try:
@@ -106,7 +133,9 @@ def check_table(tbl):
         return False
 
 def get_cols(tbl):
-    return [s.name for s in bqclient.get_table(tbl).schema if s.name.lower() != 'geoid']
+    """Get list of columns on tbl"""
+    t = bqclient.get_table(tbl)
+    return [s.name for s in t.schema]
     
 def run_query(query):
     res = bqclient.query(query).result()
@@ -128,41 +157,26 @@ def read_table(tbl, rows=99999999999, start=0, cols='*'):
         query += f' offset {start}'
     return run_query(query)
 
-def head(tbl, rows=10):
-    return read_table(tbl, rows)
-
-def load_table(tbl, df=None, file=None, query=None, overwrite=True, preview_rows=0):
-#     rpt(f'loading BigQuery table {tbl}')
+def load_table(tbl, df=None, query=None, file=None, overwrite=True, preview_rows=0):
+    """Load data into tbl either from a pandas dataframe, sql query, or local csv file"""
+    
     if overwrite:
         delete_table(tbl)
+    
     if df is not None:
         job = bqclient.load_table_from_dataframe(df, tbl).result()
-    elif file is not None:
-        with open(file, mode="rb") as f:
-            job = bqclient.load_table_from_file(f, tbl, job_config=google.cloud.bigquery.LoadJobConfig(autodetect=True)).result()
     elif query is not None:
         job = bqclient.query(query, job_config=google.cloud.bigquery.QueryJobConfig(destination=tbl)).result()
+    elif file is not None:
+        with open(file, mode='rb') as f:
+            job = bqclient.load_table_from_file(f, tbl, job_config=google.cloud.bigquery.LoadJobConfig(autodetect=True)).result()
     else:
-        raise Exception('at least one of df, file, or query must be specified')
+        raise Exception('at least one of df, query, or file must be specified')
+    
     if preview_rows > 0:
-        print(head(tbl, preview_rows))
+        head(tbl, preview_rows)
     return tbl
 
-def join_str(k=1):
-    tab = '    '
-    return ',\n' + k * tab
-
-def subquery(query, indents=1):
-    s = '\n' + indents * '    '
-    return query.strip().replace('\n', s)
-
-def time_formatter(t):
-    h, m = divmod(t, 3600)
-    m, s = divmod(m, 60)
-    return f'{int(h)}hrs {int(m)}min {s:.2f}sec'
-
-def yr_to_congress(yr):
-    return min(116, int(yr-1786)/2)
 
 def get_states():
     query = f"""
@@ -183,94 +197,174 @@ except:
     print('getting states')
     states = get_states()
 
-@dataclasses.dataclass
-class Base():
-    def __getitem__(self, key):
-        return self.__dict__[key]
-
-    def __setitem__(self, key, val):
-        self.__dict__[key] = val
 
 
-@dataclasses.dataclass
-class Variable(Base):
-    n     : typing.Any
-    name  : str = 'variable'
-    level : str = 'tabblock'
-
-    def __post_init__(self):
-        self.path = data_path / f'{self.name}/{self.n.state.abbr}'
-        a = f'{self.name}_{self.n.state.abbr}'
-        b = f'{a}_{self.yr}'
-        c = f'{b}_{self.level}'
-        self.zip     = self.path / f'{b}.zip'
-        self.pq      = self.path / f'{b}.parquet'
-        self.raw     = f'{data_bq}.{b}_raw'
-        self.tbl     = f'{data_bq}.{c}'
-        self.get()
-        os.chdir(code_path)
-        print(f'success')
-        
-    def tbl_to_file(self, tbl=None):
-        if tbl is None:
-            tbl = self.tbl
-        return self.path / tbl.split('.')[-1]
-        
-    def save_tbl(self, tbl=None):
-        if tbl is None:
-            tbl = self.tbl
-        rpt(f'saving table')
-        rpt('reading')
-        self.df = read_table(tbl=tbl)
-        rpt('to parquet')
-        self.df.to_parquet(self.pq)
-#         rpt('to csv')
-#         self.csv = self.pq.with_suffix('.csv')
-#         self.df.to_csv(self.csv)
-        rpt('to gcs')
-        to_gcs(self.pq)
-#         to_gcs(self.csv)
-        
-    def get_zip(self):
-        try:
-            self.zipfile = zf.ZipFile(self.zip)
-            rpt(f'zip exists')
-        except:
-            try:
-                rpt(f'getting zip from {self.url}')
-                self.zipfile = zf.ZipFile(urllib.request.urlretrieve(self.url, self.zip)[0])
-                to_gcs(self.zip)
-                rpt(f'finished{concat_str}processing')
-            except urllib.error.HTTPError:
-                raise Exception(f'n\nFAILED - BAD URL {self.url}\n\n')
 
 
-    def get(self):
-        rpt(f"Get {self.tbl.split('.')[-1]}".ljust(33, ' '))
-        if self.name in self.n.refresh_tbl:
-            delete_table(self.tbl)
-            
-        if self.name in self.n.refresh_all:
-            delete_table(self.raw)
-            shutil.rmtree(self.path, ignore_errors=True)
+
+# def to_gcs(file):
+#     gcs_bucket.blob(str(file).replace(str(root_path)+'/', '')).upload_from_filename(file)
+
     
-        self.path.mkdir(parents=True, exist_ok=True)
-        os.chdir(self.path)
-        exists = dict()
-        exists['df'] = hasattr(self, 'df')
-        if exists['df']:
-            rpt(f'dataframe exists')
-        
-        exists['tbl'] = check_table(self.tbl)
-        if exists['tbl']:
-            rpt(f'{self.level} table exists')
-        else:
-            exists['raw'] = check_table(self.raw)
-            if exists['raw']:
-                rpt(f'raw table exists')
-        return exists
+# def check_level(level):
+#     assert level in Levels, f"level must be one of {Levels}, got {level}"
 
-############################################################################################################
+# def check_district_type(district_type):
+#     assert district_type in District_types, f"district must be one of {District_types}, got {district_type}"
+
+# def check_year(year):
+#     assert year in Years, f"year must be one of {Years}, got {year}"
+
+# def check_group(group):
+#     assert group in Groups, f"group must be one of {Groups}, got {group}"
+    
+# def lower_cols(df):
+#     df.rename(columns = {x:str(x).lower() for x in df.columns}, inplace=True)
+#     return df
+
+# def lower(df):
+#     if isinstance(df, pd.Series):
+#         try:
+#             return df.str.lower()
+#         except:
+#             return df
+#     elif isinstance(df, pd.DataFrame):
+#         lower_cols(df)
+#         return df.apply(lower)
+#     else:
+#         return df
+
+
+# def rjust(col):
+#     c = col.astype(str)
+#     d = c.apply(len).max()
+#     return c.str.rjust(d, '0')
+    
+
+
+# def join_str(k=1):
+#     tab = '    '
+#     return ',\n' + k * tab
+
+# # def subquery(query, indents=1):
+# #     s = '\n' + indents * '    '
+# #     return query.strip().replace('\n', s)
+
+# # def time_formatter(t):
+# #     h, m = divmod(t, 3600)
+# #     m, s = divmod(m, 60)
+# #     return f'{int(h)}hrs {int(m)}min {s:.2f}sec'
+
+# # def yr_to_congress(yr):
+# #     return min(116, int(yr-1786)/2)
+
+# def get_states():
+#     query = f"""
+# select
+#     state_fips_code as fips
+#     , state_postal_abbreviation as abbr
+#     , state_name as name
+# from
+#     bigquery-public-data.census_utility.fips_codes_states
+# where
+#     state_fips_code <= '56'
+# """
+#     return lower_cols(run_query(query)).set_index('name')
+
+# try:
+#     states
+# except:
+#     print('getting states')
+#     states = get_states()
+
+# @dataclasses.dataclass
+# class Base():
+#     def __getitem__(self, key):
+#         return self.__dict__[key]
+
+#     def __setitem__(self, key, val):
+#         self.__dict__[key] = val
+
+
+# @dataclasses.dataclass
+# class Variable(Base):
+#     n     : typing.Any
+#     name  : str = 'variable'
+#     level : str = 'tabblock'
+
+#     def __post_init__(self):
+#         self.path = data_path / f'{self.name}/{self.n.state.abbr}'
+#         a = f'{self.name}_{self.n.state.abbr}'
+#         b = f'{a}_{self.yr}'
+#         c = f'{b}_{self.level}'
+#         self.zip     = self.path / f'{b}.zip'
+#         self.pq      = self.path / f'{b}.parquet'
+#         self.raw     = f'{data_bq}.{b}_raw'
+#         self.tbl     = f'{data_bq}.{c}'
+#         self.get()
+#         os.chdir(code_path)
+#         print(f'success')
+        
+#     def tbl_to_file(self, tbl=None):
+#         if tbl is None:
+#             tbl = self.tbl
+#         return self.path / tbl.split('.')[-1]
+        
+#     def save_tbl(self, tbl=None):
+#         if tbl is None:
+#             tbl = self.tbl
+#         rpt(f'saving table')
+#         rpt('reading')
+#         self.df = read_table(tbl=tbl)
+#         rpt('to parquet')
+#         self.df.to_parquet(self.pq)
+# #         rpt('to csv')
+# #         self.csv = self.pq.with_suffix('.csv')
+# #         self.df.to_csv(self.csv)
+#         rpt('to gcs')
+#         to_gcs(self.pq)
+# #         to_gcs(self.csv)
+        
+#     def get_zip(self):
+#         try:
+#             self.zipfile = zf.ZipFile(self.zip)
+#             rpt(f'zip exists')
+#         except:
+#             try:
+#                 rpt(f'getting zip from {self.url}')
+#                 self.zipfile = zf.ZipFile(urllib.request.urlretrieve(self.url, self.zip)[0])
+#                 to_gcs(self.zip)
+#                 rpt(f'finished{concat_str}processing')
+#             except urllib.error.HTTPError:
+#                 raise Exception(f'n\nFAILED - BAD URL {self.url}\n\n')
+
+
+#     def get(self):
+#         rpt(f"Get {self.tbl.split('.')[-1]}".ljust(33, ' '))
+#         if self.name in self.n.refresh_tbl:
+#             delete_table(self.tbl)
+            
+#         if self.name in self.n.refresh_all:
+#             delete_table(self.raw)
+#             shutil.rmtree(self.path, ignore_errors=True)
+    
+#         self.path.mkdir(parents=True, exist_ok=True)
+#         os.chdir(self.path)
+#         exists = dict()
+#         exists['df'] = hasattr(self, 'df')
+#         if exists['df']:
+#             rpt(f'dataframe exists')
+        
+#         exists['tbl'] = check_table(self.tbl)
+#         if exists['tbl']:
+#             rpt(f'{self.level} table exists')
+#         else:
+#             exists['raw'] = check_table(self.raw)
+#             if exists['raw']:
+#                 rpt(f'raw table exists')
+#         return exists
+
+# ############################################################################################################
     
 
     
