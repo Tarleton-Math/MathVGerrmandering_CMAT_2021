@@ -1,10 +1,6 @@
 from . import *
 import urllib, zipfile as zf, shapely.ops
 
-def extract_file(zipfile, fn, **kwargs):
-    file = zipfile.extract(fn)
-    return lower_cols(pd.read_csv(file, dtype=str, **kwargs))
-
 @dataclasses.dataclass
 class Data(Base):
     election_filters  : typing.Tuple = (
@@ -13,10 +9,10 @@ class Data(Base):
         "office like 'USRep%' and race='general'")
         
     def __post_init__(self):
-        self.Sources = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'joined')
+        self.Sources = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'all', 'proposals')
         super().__post_init__()
         if len(self.refresh_tbl) > 0:
-            self.refresh_tbl.add('joined')
+            self.refresh_tbl.add('all')
 
         self.tbl  = dict()
         self.pq   = dict()
@@ -30,61 +26,75 @@ class Data(Base):
             self.path[src] = self.pq[src].parent
 
         for src in self.Sources:
-            rpt(f'Get {src}'.ljust(rpt_just, ' '))
-            self.delete_for_refresh(src)
-            self[f'get_{src}']()
-            print(f'success!')
-            os.chdir(code_path)
-            
+            if src != 'proposals':
+                self.get(src)
+
+#####################################################################################################
+#####################################################################################################
+
+    def get_proposals(self):
+        src = 'proposals'
+        missing_plans = []
+        for district_type, abbr in {'cd':'c', 'sldu':'s', 'sldl':'h'}.items():
+            proposal_path = self.path[src] / district_type
+            proposal_path.mkdir(parents=True, exist_ok=True)
+            os.chdir(proposal_path)
+            os.system("unzip -u '*.zip' >/dev/null 2>&1");
+            not_found = 0
+            for n in range(1000):
+                plan = f'plan{abbr}{2100+n}'.lower()
+                f = proposal_path / f'{plan.upper()}.csv'
+                url = f'https://data.capitol.texas.gov/dataset/{plan}'
+                try:
+                    urllib.request.urlopen(url)
+                    not_found = 0
+                    if not f.is_file():
+                        missing_plans.append(plan)
+                except urllib.error.HTTPError:
+                    not_found += 1
+                if not_found > 5:
+                    break
+        os.chdir(code_path)
+        print(f'missing plans: {missing_plans}')
+
 #####################################################################################################
 #####################################################################################################
         
     def fetch(self, src, url):
-        tbl, zp, pq, path = self.tbl[src], self.zp[src], self.pq[src], self.path[src]
-
-        if check_table(tbl):
-            rpt(f'using existing table')
+        try:
+            df = pd.read_parquet(self.pq[src])
+            rpt(f'using existing parquet')
+            rpt(f'loading table')
+            load_table(self.tbl[src], df=df)
             zipfile = False
-        else:
+        except:
+            self.path[src].mkdir(parents=True, exist_ok=True)
+            os.chdir(self.path[src])
             try:
-                df = pd.read_parquet(pq)
-                rpt(f'using existing parquet')
-                rpt(f'loading table')
-                load_table(tbl, df=df)
-                zipfile = False
+                zipfile = zf.ZipFile(self.zp[src])
+                rpt(f'using existing zip')
             except:
-                path.mkdir(parents=True, exist_ok=True)
-                os.chdir(path)
                 try:
-                    zipfile = zf.ZipFile(zp)
-                    rpt(f'using existing zip')
-                except:
-                    try:
-                        rpt(f'downloading zip from {url}')
-                        zipfile = zf.ZipFile(urllib.request.urlretrieve(url, zp)[0])
-                    except urllib.error.HTTPError:
-                        raise Exception(f'n\nFAILED - BAD URL {url}\n\n')
-        return zipfile, tbl, zp, pq, path
+                    rpt(f'downloading zip from {url}')
+                    zipfile = zf.ZipFile(urllib.request.urlretrieve(url, self.zp[src])[0])
+                except urllib.error.HTTPError:
+                    raise Exception(f'n\nFAILED - BAD URL {url}\n\n')
+        return zipfile
 
 #####################################################################################################
 #####################################################################################################
     
-    def get_joined(self):
-        src = 'joined'
-        tbl, zp, pq, path = self.tbl[src], self.zp[src], self.pq[src], self.path[src]
-        if check_table(tbl):
-            rpt(f'using existing table')
-        else:
-            rpt(f'creating table')
-            cols = {'A' : self.Levels + self.District_types,
-                    'C' : ['total_pop_prop', 'seats_cd', 'seats_sldu', 'seats_sldl'] + Census_columns['data'],
-                    'E' : [c for c in get_cols(self.tbl['elections']) if c not in ['geoid', 'county']],
-                    'S' : ['aland', 'polygon']}
-            sels = ([f'A.{c} as {c}'              for c in cols['A']] + 
-                    [f'coalesce(C.{c}, 0) as {c}' for c in cols['C']] + 
-                    [f'coalesce(E.{c}, 0) as {c}' for c in cols['E']] + 
-                    [f'S.{c} as {c}'              for c in cols['S']])
-            query = f"""
+    def get_all(self):
+        src = 'all'
+        cols = {'A' : self.Levels + self.District_types,
+                'C' : ['seats_cd', 'seats_sldu', 'seats_sldl', 'total_pop_prop'] + Census_columns['data'],
+                'E' : [c for c in get_cols(self.tbl['elections']) if c not in ['geoid', 'county']],
+                'S' : ['aland', 'polygon']}
+        sels = ([f'A.{c} as {c}'              for c in cols['A']] + 
+                [f'coalesce(C.{c}, 0) as {c}' for c in cols['C']] + 
+                [f'coalesce(E.{c}, 0) as {c}' for c in cols['E']] + 
+                [f'S.{c} as {c}'              for c in cols['S']])
+        query = f"""
 select
     A.geoid,
     max(E.county) over (partition by A.cnty) as county,
@@ -104,8 +114,7 @@ left join
 on
     A.geoid = S.geoid
 """
-#             print(query)
-            load_table(tbl, query=query, preview_rows=0)
+        load_table(self.tbl[src], query=query, preview_rows=0)
     
 #####################################################################################################
 #####################################################################################################
@@ -113,11 +122,11 @@ on
     def get_elections(self):
         src = 'elections'
         url = f'https://data.capitol.texas.gov/dataset/aab5e1e5-d585-4542-9ae8-1108f45fce5b/resource/253f5191-73f3-493a-9be3-9e8ba65053a2/download/{self.census_yr}-general-vtd-election-data.zip'
-        zipfile, tbl, zp, pq, path = self.fetch(src, url)
+        zipfile = self.fetch(src, url)
         if zipfile is False:
             return
         
-        tbl_raw = tbl + '_raw'
+        tbl_raw = self.tbl[src] + '_raw'
         if check_table(tbl_raw):
             rpt(f'using existing raw table')
         else:
@@ -194,7 +203,7 @@ where
 order by
     geoid
 """
-        tbl_temp = tbl + '_temp'
+        tbl_temp = self.tbl[src] + '_temp'
         load_table(tbl_temp, query=query, preview_rows=0)
 
 ######## To bring everything into one table, we must pivot from long to wide format (one row per tabblock) ########
@@ -210,7 +219,7 @@ order by
             b = a + stride
             rpt(f'pivoting columns {a} thru {b}')
             E = elections[a:b]
-            t = f'{tbl}_{a}'
+            t = f'{self.tbl[src]}_{a}'
             tbl_chunks.append(t)
             query = f"""
 select
@@ -250,32 +259,32 @@ on
     A.geoid = {alias}.geoid
 """
         query_join += f'order by geoid'
-
-######## clean up ########
-        load_table(tbl, query=query_join, preview_rows=0)
+        load_table(self.tbl[src], query=query_join, preview_rows=0)
         delete_table(tbl_temp)
         for t in tbl_chunks:
             delete_table(t)
 
 #####################################################################################################
 #####################################################################################################
-    
+#
+#     def add_header(self, file, header):
+#         Used for 2010 Census - unused now, but saved for possible future resurrection
+#         cmd = 'sed -i "1s/^/' + '|'.join(header) + '\\n/" ' + file
+#         os.system(cmd)
+
     def get_census(self):
         src = 'census'
         url = f'https://www2.census.gov/programs-surveys/decennial/{self.census_yr}/data/01-Redistricting_File--PL_94-171/{self.state.name.replace(" ", "_")}/{self.state.abbr.lower()}{self.census_yr}.pl.zip'
-        zipfile, tbl, zp, pq, path = self.fetch(src, url)
+        zipfile = self.fetch(src, url)
         if zipfile is False:
             return
 
-        tbl_raw = tbl + '_raw'
+        tbl_raw = self.tbl[src] + '_raw'
         if check_table(tbl_raw):
             rpt(f'using existing raw table')
         else:
             rpt(f'creating raw table')
-            def add_header(self, file, header):
-                cmd = 'sed -i "1s/^/' + '|'.join(header) + '\\n/" ' + file
-                os.system(cmd)
-    ######## In 2010 PL_94-171 involved 3 files - we first load each into a temp table ########
+    ######## PL_94-171 involves multiple files - load each into a temp table ########
             temp = dict()
             for fn in zipfile.namelist():
                 if fn[-3:] == '.pl':
@@ -289,11 +298,7 @@ on
                     else:
                         rpt(f'processing {fn}')
                         file = zipfile.extract(fn)
-        ######## Geo file is fixed width (not delimited) and must be handled carefully ########                
-
                         schema = [google.cloud.bigquery.SchemaField(**col) for col in Census_columns[i]]
-
-                        delete_table(temp[i])
                         with open(file, mode='rb') as f:
                             bqclient.load_table_from_file(f, temp[i], job_config=google.cloud.bigquery.LoadJobConfig(field_delimiter='|', schema=schema)).result()
         #                 os.unlink(fn)
@@ -333,7 +338,6 @@ order by
     geoid
 """
             load_table(tbl_raw, query=query, preview_rows=0)
-######## clean up ########
             for t in temp.values():
                 delete_table(t)
     
@@ -389,7 +393,7 @@ from (
 order by
     geoid
 """
-        load_table(tbl, query=query, preview_rows=0)
+        load_table(self.tbl[src], query=query, preview_rows=0)
 
 #####################################################################################################
 #####################################################################################################
@@ -402,11 +406,11 @@ order by
         elif self.shapes_yr == 2020:
             url += '20'
         url += f'/tl_{self.shapes_yr}_{self.state.fips}_tabblock{str(self.shapes_yr)[-2:]}.zip'
-        zipfile, tbl, zp, pq, path = self.fetch(src, url)
+        zipfile = self.fetch(src, url)
         if zipfile is False:
             return
         
-        tbl_raw = tbl + '_raw'
+        tbl_raw = self.tbl[src] + '_raw'
         if check_table(tbl_raw):
             rpt(f'using existing raw table')
         else:
@@ -417,7 +421,7 @@ order by
             chunk_size = 50000
             while True:
                 rpt(f'starting row {a}')
-                df = lower(gpd.read_file(path, rows=slice(a, a+chunk_size)))
+                df = lower(gpd.read_file(self.path[src], rows=slice(a, a+chunk_size)))
                 df.columns = [x[:-2] if x[-2:].isnumeric() else x for x in df.columns]
                 df = df[['geoid', 'aland', 'geometry']]
                 # convert to https://spatialreference.org/ref/esri/usa-contiguous-albers-equal-area-conic/ to buffer
@@ -441,7 +445,7 @@ from
 order by
     geoid
 """
-        load_table(tbl, query=query, preview_rows=0)
+        load_table(self.tbl[src], query=query, preview_rows=0)
         delete_table(tbl_raw)
 
 #####################################################################################################
@@ -453,11 +457,11 @@ order by
         if self.census_yr == 2020:
             url += '2020'
         url += f'/BlockAssign_ST{self.state.fips}_{self.state.abbr.upper()}.zip'
-        zipfile, tbl, zp, pq, path = self.fetch(src, url)
+        zipfile = self.fetch(src, url)
         if zipfile is False:
             return
 
-        rpt(f'processing')
+        rpt(f'creating table')
         L = []
         for fn in zipfile.namelist():
             col = fn.lower().split('_')[-1][:-4]
@@ -481,12 +485,8 @@ order by
         df['bg']       = c[:12]
         df['tabblock'] = c[:15]
         df = df[['geoid', 'tabblock', 'bg', 'tract', 'cnty', 'cntyvtd', 'cd', 'sldu', 'sldl']]
-#         df['cd_prop']   = df['cd']
-#         df['sldu_prop'] = df['sldu']
-#         df['sldl_prop'] = df['sldl']
-#         df = df[['geoid', 'tabblock', 'bg', 'tract', 'cnty', 'cntyvtd', 'cd', 'cd_prop', 'sldu', 'sldu_prop', 'sldl', 'sldl_prop']]
         rpt(f'creating table')
-        load_table(tbl, df=df, preview_rows=0)
+        load_table(self.tbl[src], df=df, preview_rows=0)
 
 #####################################################################################################
 #####################################################################################################
@@ -494,11 +494,11 @@ order by
     def get_crosswalks(self):
         src = 'crosswalks'
         url = f'https://www2.census.gov/geo/docs/maps-data/data/rel2020/t10t20/TAB2010_TAB2020_ST{self.state.fips}.zip'
-        zipfile, tbl, zp, pq, path = self.fetch(src, url)
+        zipfile = self.fetch(src, url)
         if zipfile is False:
             return
             
-        rpt(f'processing')
+        rpt(f'creating table')
         geoids = [f'geoid_{yr}' for yr in [2020, 2010]]
         for fn in zipfile.namelist():
             df = extract_file(zipfile, fn, sep='|')
@@ -511,4 +511,4 @@ order by
         df['aland_prop'] = (df['arealand_int'] / df['A']).fillna(0)
         df = df[geoids+['aland_prop']].sort_values(geoids[0])
         rpt(f'creating table')
-        load_table(tbl, df=df, preview_rows=0)
+        load_table(self.tbl[src], df=df, preview_rows=0)

@@ -2,75 +2,75 @@ from . import *
 import networkx as nx
 proposal_default = 'enacted2010'
 
+################# graph utilities #################
+
+def get_components(G):
+    # get and sorted connected components by size
+    return sorted([tuple(x) for x in nx.connected_components(G)], key=lambda x:len(x), reverse=True)
+
+def district_view(G, D):
+    # get subgraph of a given district
+    return nx.subgraph_view(G, lambda n: G.nodes[n]['district'] == D)
+
+def get_components_district(G, D):
+    # get connected components of a district
+    return get_components(district_view(G, D))
+
+def get_hash(G):
+    # Partition hashing provides a unique integer label for each distinct plan
+    # For each district, get sorted tuple of nodes it contains.  Then sort this tuple of tuples.
+    # Produces a sorted tuple of sorted tuples called "partition" that does not care about:
+    # permutations of the nodes within a district OR permutations of the district labels.
+    # WARNING - Python inserts randomness into its hash function for security reasons.
+    # However, this means the same partition gets a different hash in different runs.
+    # The first lines of this .py file fix this issue by setting the hashseen
+    # But this solution does NOT work in a Jupyter notebook, AFAIK.
+    # I have not found a way to force deterministic hashing in Jupyter.
+    districts = set(d for n, d in G.nodes(data='district'))
+    partition = tuple(sorted(tuple(sorted(district_view(G, D).nodes)) for D in districts))
+    return partition.__hash__()
+
+
 @dataclasses.dataclass
 class MCMC(Base):
     proposal: str = proposal_default
     contract: str = '0'
         
     def __post_init__(self):
-        self.Sources = ('proposal', 'nodes', 'graph', 'results')
+        self.Sources = ('proposals', 'nodes', 'graphs')
+        
         super().__post_init__()
-        self.refresh_all.discard('proposal')
+        self.refresh_all.discard(self.proposal)
 
         self.tbl  = dict()
         self.pq   = dict()
+        self.csv  = dict()
         self.path = dict()
-        stem = f'{self.state.abbr}_{self.census_yr}'
-        self.tbl['source'] = f'{data_bq}.{stem}_source_all'
-        
-#         stem += f'_{self.proposal}'
-#         self.tbl['proposal'] = f'{data_bq}.{stem}'
-#         stem += f'_{self.level}_{self.contract}'
-
-#         stem += f'_{self.district_type}_{self.proposal}_{self.level}_{self.contract}'
-#         for src in self.Sources:
-#             self.tbl [src] = f'{data_bq}.{stem}_{src}'
-#             self.pq  [src] = data_path/f'{stem}/{stem}_{src}.parquet'
-#             self.path[src] = self.pq[src].parent
-    
-        stem += f'_{self.district_type}_{self.proposal}'
+        self.tbl['source'] = f'{data_bq}.{self.state.abbr}_{self.census_yr}_source_all'
         for src in self.Sources:
-            s = stem
-            if src == 'proposal':
-                s += f'_{self.level}_{self.contract}'
-            
-            self.tbl [src] = f'{data_bq}.{s}_{src}'
-            self.pq  [src] = data_path/f'{stem}/{s}_{src}.parquet'
+            stem = f'{self.state.abbr}_{self.census_yr}_{self.district_type}_{self.proposal}'
+            if src == 'proposals':
+                self.csv[src] = data_path / f'{src}/{self.state.abbr}/{self.district_type}/{self.proposal.upper()}.csv'
+            else:
+                stem += f'_{self.level}_{self.contract}_{src}'
+            self.tbl [src] = f'{data_bq}.{stem}'
+            self.pq  [src] = data_path / f'{src}/{self.state.abbr}/{self.district_type}/{stem}.parquet'
             self.path[src] = self.pq[src].parent
 
+        for src in self.Sources:
+            self.get(src)
 
-        for src in ('proposal',):
-            rpt(f'Get {src}'.ljust(rpt_just, ' '))
-            self.delete_for_refresh(src)
-            self[f'get_{src}']()
-            print(f'success!')
-            os.chdir(code_path)
 
-        
-#         for src in self.Sources:
-#             stem += f'_{self.level}_{self.contract}_{src}'
-#             self.tbl [src] = f'{data_bq}.{stem}'
-#             self.pq  [src] = data_path / f'{src}/{stem}.parquet'
-#             self.path[src] = self.pq[src].parent
-            
-#         self.seats = f'seats_{self.district_type}'
-#         self.get_nodes()
-        
-        
-    def get_proposal(self):
-        src = self.proposal
+    def get_proposals(self):
+        src = 'proposals'
         if self.proposal != proposal_default:
-            if check_table(self.tbl['proposal']):
-                rpt('using existing proposal table')
-            else:
-                csv = data_path / f'proposals/{self.district_type}/{self.proposal}.csv'
-                rpt(f'creating proposal table from {csv}')
-                df = pd.read_csv(csv, skiprows=1, names=('geoid', self.district_type), dtype={'geoid':str})
-                load_table(self.tbl['proposal'], df=df)
-
+            rpt(f'creating proposal table from {self.csv[src]}')
+            df = pd.read_csv(self.csv[src], skiprows=1, names=('geoid', self.district_type), dtype={'geoid':str})
+            load_table(self.tbl['proposals'], df=df)
         
         
-    def get_nodes(self, show=True):
+    def get_nodes(self, show=False):
+        src = 'nodes'
         # Builds a deeply nested SQL query to generate nodes
         # We build the query one level of nesting at a time store the "cumulative query" at each step
         # Python builds the SQL query using f-strings.  If you haven't used f-string, they are f-ing amazing.
@@ -86,7 +86,7 @@ select
     substring(cnty,3) as cnty,
     county,
     cntyvtd as cntyvtd_temp,
-    {self.seats} as seats,
+    seats_{self.district_type} as seats,
 from
     {self.tbl['source']}
 """)
@@ -104,7 +104,7 @@ from (
 """)
     
         else:
-            cols = get_cols(self.tbl['proposal'])
+            cols = get_cols(self.tbl['proposals'])
             query.append(f"""
 select
     A.*,
@@ -113,7 +113,7 @@ from (
     {subquery(query[-1])}
     ) as A
 inner join
-    {self.tbl['proposal']} as B
+    {self.tbl['proposals']} as B
 on
     A.geoid = cast(B.{cols[0]} as string)
 """)
@@ -278,7 +278,7 @@ from (
         # Time for the big aggregration step.
         # Get names of the remaining data columns of source
         cols = get_cols(self.tbl['source'])
-        a = cols.index('total_pop_prop')
+        a = cols.index('total_pop')
         b = cols.index('aland')
         # Create a list of sum statements for these columns to use in the select
         sels = ',\n    '.join([f'sum({c}) as {c}' for c in cols[a:b]])
@@ -288,9 +288,10 @@ from (
         query.append(f"""
 select
     A.geoid_new as geoid,
-    max(district_new) as district,
-    max(county_new  ) as county,
-    max(cntyvtd_new ) as cntyvtd,
+    max(A.district_new) as district,
+    max(A.county_new  ) as county,
+    max(A.cntyvtd_new ) as cntyvtd,
+    sum(A.seats       ) as seats,
     {sels},
     st_union_agg(polygon) as polygon,
     sum(aland) as aland
@@ -331,7 +332,118 @@ from (
 
         if show:
             for k, q in enumerate(query):
-                print(f'\n\nquery {k}')
+                print(f'\n=====================================================================================\nstage {k}')
                 print(q)
     
-#         return query[-1]
+        load_table(self.tbl[src], query=query[-1])
+        
+
+
+    def get_graphs(self, nodes_tbl, new_districts=0, node_attr=(), edge_attr=(), random_seed=0):
+        src = 'graph'
+        # what attributes will be stored in nodes & edges
+        node_attr = {'geoid', 'county', 'district', 'total_pop', 'seats', 'aland', 'perim'}.union(node_attr)
+        edge_attr = {'distance', 'shared_perim'}.union(edge_attr)
+        # retrieve node data
+        nodes_query = f'select {", ".join(node_attr)} from {self.tbl["nodes"]}'
+        nodes = run_query(nodes_query).set_index('geoid')
+
+        # get unique districts & counties
+        districts = set(nodes['district'])
+        counties  = set(nodes['county'  ])
+
+        # set random number generator for reproducibility
+        rng = np.random.default_rng(random_seed)
+
+        # find eges = pairs of nodes that border each other
+        edges_query = f"""
+select
+    *
+from (
+    select
+        x.geoid as geoid_x,
+        y.geoid as geoid_y,        
+        st_distance(x.point, y.point) as distance,
+        st_perimeter(st_intersection(x.polygon, y.polygon)) as shared_perim
+    from
+        {self.tbl['nodes']} as x,
+        {self.tbl['nodes']} as y
+    where
+        x.geoid < y.geoid
+        and st_intersects(x.polygon, y.polygon)
+    )
+where
+    shared_perim > 0.01
+"""
+        edges = run_query(edges_query)
+
+        # create graph from edges and add node attributes
+        self.graph = nx.from_pandas_edgelist(edges, source=f'geoid_x', target=f'geoid_y', edge_attr=tuple(edge_attr))
+        nx.set_node_attributes(self.graph, nodes.to_dict('index'))
+
+
+        # Check for disconnected districts & fix
+        # This is rare, but can potentially happen during county-node contraction.
+        connected = False
+        while not connected:
+            connected = True
+            for D in districts:
+                comp = get_components_district(self.graph, D)
+                if len(comp) > 1:
+                    # district disconnected - keep largest component and "dissolve" smaller ones into other contiguous districts.
+                    # May create population deviation which will be corrected during MCMC.
+                    print(f'regrouping to connect components of district {D} with component {[len(c) for c in comp]}')
+                    connected = False
+                    for c in comp[1:]:
+                        for x in c:
+                            y = rng.choice(list(self.graph.neighbors(x)))  # chose a random neighbor
+                            self.graph.nodes[x]['district'] = self.graph.nodes[y]['district']  # adopt its district
+
+        # Create new districts starting at nodes with high population
+        new_district_starts = nodes.nlargest(10 * new_districts, 'total_pop').index.tolist()
+        D_new = max(districts) + 1
+        while new_districts > 0:
+            # get most populous remaining node, make it a new district
+            # check if this disconnected its old district.  If so, undo and try next node.
+            n = new_district_starts.pop(0)
+            D_old = self.graph.nodes[n]['district']
+            self.graph.nodes[n]['district'] = D_new
+            comp = get_components_district(self.graph, D_old)
+            if len(comp) == 1:
+                # success
+                D_new += 1
+                new_districts -= 1
+            else:
+                # fail - disconnected old district - undo and try again
+                self.graph.nodes[n]['district'] = D_old
+
+
+        # Create the county-district bi-partite adjacency graph.
+        # This graph has 1 node for each county and district &
+        # an edge for all (county, district) that intersect (share land).
+        # It is an efficient tool to track map defect and other properties.
+        self.adj = nx.Graph()
+        for n, data in self.graph.nodes(data=True):
+            D = data['district']
+            self.adj.add_node(D)  # adds district node if not already present
+            self.adj.nodes[D]['polsby_popper'] = 0
+            for k in ['total_pop', 'aland', 'perim']:
+                try:
+                    self.adj.nodes[D][k] += data[k]  # add to attribute if exists
+                except:
+                    self.adj.nodes[D][k] = data[k]  # else create attribute
+
+            C = data['county']
+            self.adj.add_node(C)  # adds county node if not already present
+            for k in ['total_pop', seats]:
+                try:
+                    self.adj.nodes[C][k] += data[k]  # add to attribute if exists
+                except:
+                    v.nodes[C][k] = data[k]  # else create attribute
+
+            self.adj.add_edge(C, D)  # create edge
+
+        # get defect targets
+        for C in counties:
+            self.adj.nodes[C]['whole_target']     = int(np.floor(self.adj.nodes[C][seats]))
+            self.adj.nodes[C]['intersect_target'] = int(np.ceil (self.adj.nodes[C][seats]))
