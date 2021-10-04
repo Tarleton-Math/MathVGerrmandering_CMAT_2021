@@ -41,7 +41,7 @@ crs_length = 'ESRI:102005'
 # meters_per_mile = 1609.344
 concat_str = ' ... '
 join_str   = ',\n    '
-rpt_just   = 20
+rpt_just   = 15
 
 
 def listify(x=None):
@@ -119,6 +119,7 @@ class Base():
     def get(self, src):
         rpt(f'Get {src}'.ljust(rpt_just, ' '))
         self.delete_for_refresh(src)
+        self.path[src].mkdir(parents=True, exist_ok=True)
         if check_table(self.tbl[src]):
             rpt('using existing table')
         else:

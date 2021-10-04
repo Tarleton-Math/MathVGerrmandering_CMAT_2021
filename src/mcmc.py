@@ -33,17 +33,22 @@ def get_hash(G):
 
 @dataclasses.dataclass
 class MCMC(Base):
-    proposal: str = proposal_default
-    contract: str = '0'
+    proposal   : str = proposal_default
+    contract   : str = '0'
+    node_attr  : typing.Tuple = ()
+    edge_attr  : typing.Tuple = ()
+    random_seed: int = 0
         
     def __post_init__(self):
-        self.Sources = ('proposals', 'nodes', 'graphs')
+        self.Sources = ('proposals', 'nodes', 'graphs', 'adjs')
         
         super().__post_init__()
         self.refresh_all.discard(self.proposal)
+        self.random_seed = int(self.random_seed)
+        self.rng = np.random.default_rng(self.random_seed)
 
         self.tbl  = dict()
-        self.pq   = dict()
+        self.gp   = dict()
         self.csv  = dict()
         self.path = dict()
         self.tbl['source'] = f'{data_bq}.{self.state.abbr}_{self.census_yr}_source_all'
@@ -53,14 +58,141 @@ class MCMC(Base):
                 self.csv[src] = data_path / f'{src}/{self.state.abbr}/{self.district_type}/{self.proposal.upper()}.csv'
             else:
                 stem += f'_{self.level}_{self.contract}_{src}'
+                if src != 'nodes':
+                    stem += f'_{self.random_seed}'
             self.tbl [src] = f'{data_bq}.{stem}'
-            self.pq  [src] = data_path / f'{src}/{self.state.abbr}/{self.district_type}/{stem}.parquet'
-            self.path[src] = self.pq[src].parent
+            self.gp  [src] = data_path / f'{src}/{self.state.abbr}/{self.district_type}/{stem}.gpickle'
+            self.path[src] = self.gp[src].parent
 
         for src in self.Sources:
             self.get(src)
 
 
+    def get_graphs(self):
+        src = 'graphs'
+        try:
+            self.graph = nx.read_gpickle(self.gp[src])
+            rpt(f'using existing graph')
+            return
+        except:
+            rpt(f'creating graph')
+        # what attributes will be stored in nodes & edges
+        self.node_attr = {'geoid', 'county', 'district', 'total_pop', 'seats', 'aland', 'perim'}.union(self.node_attr)
+        self.edge_attr = {'distance', 'shared_perim'}.union(self.edge_attr)
+        # retrieve node data
+        nodes_query = f'select {", ".join(self.node_attr)} from {self.tbl["nodes"]}'
+        nodes = run_query(nodes_query).set_index('geoid')
+
+        # get unique districts & counties
+        self.districts = set(nodes['district'])
+        self.counties  = set(nodes['county'  ])
+
+        # find eges = pairs of nodes that border each other
+        edges_query = f"""
+select
+    *
+from (
+    select
+        x.geoid as geoid_x,
+        y.geoid as geoid_y,        
+        st_distance(x.point, y.point) as distance,
+        st_perimeter(st_intersection(x.polygon, y.polygon)) as shared_perim
+    from
+        {self.tbl['nodes']} as x,
+        {self.tbl['nodes']} as y
+    where
+        x.geoid < y.geoid
+        and st_intersects(x.polygon, y.polygon)
+    )
+where
+    shared_perim > 0.01
+"""
+        edges = run_query(edges_query)
+
+        # create graph from edges and add node attributes
+        self.graph = nx.from_pandas_edgelist(edges, source=f'geoid_x', target=f'geoid_y', edge_attr=tuple(self.edge_attr))
+        nx.set_node_attributes(self.graph, nodes.to_dict('index'))
+
+        # Check for disconnected districts & fix
+        # This is rare, but can potentially happen during county-node contraction.
+        connected = False
+        while not connected:
+            connected = True
+            for D in self.districts:
+                comp = get_components_district(self.graph, D)
+                if len(comp) > 1:
+                    # district disconnected - keep largest component and "dissolve" smaller ones into other contiguous districts.
+                    # May create population deviation which will be corrected during MCMC.
+                    print(f'regrouping to connect components of district {D} with component {[len(c) for c in comp]}')
+                    connected = False
+                    for c in comp[1:]:
+                        for x in c:
+                            y = self.rng.choice(list(self.graph.neighbors(x)))  # chose a random neighbor
+                            self.graph.nodes[x]['district'] = self.graph.nodes[y]['district']  # adopt its district
+
+        # Create new districts starting at nodes with high population
+        new_districts = self.seats[self.district_type] - len(self.districts)
+        if new_districts > 0:
+            new_district_starts = nodes.nlargest(10 * new_districts, 'total_pop').index.tolist()
+            D_new = max(self.districts) + 1
+            while new_districts > 0:
+                # get most populous remaining node, make it a new district
+                # check if this disconnected its old district.  If so, undo and try next node.
+                n = new_district_starts.pop(0)
+                D_old = self.graph.nodes[n]['district']
+                self.graph.nodes[n]['district'] = D_new
+                comp = get_components_district(self.graph, D_old)
+                if len(comp) == 1:
+                    # success
+                    D_new += 1
+                    new_districts -= 1
+                else:
+                    # fail - disconnected old district - undo and try again
+                    self.graph.nodes[n]['district'] = D_old
+        nx.write_gpickle(self.graph, self.gp[src])
+
+
+    def get_adjs(self):
+        src = 'adjs'
+        try:
+            self.adj = nx.read_gpickle(self.gp[src])
+            rpt(f'using existing adj')
+            return
+        except:
+            rpt(f'creating adj')
+
+        # Create the county-district bi-partite adjacency graph.
+        # This graph has 1 node for each county and district &
+        # an edge for all (county, district) that intersect (share land).
+        # It is an efficient tool to track map defect and other properties.
+        self.adj = nx.Graph()
+        for n, data in self.graph.nodes(data=True):
+            D = data['district']
+            self.adj.add_node(D)  # adds district node if not already present
+            self.adj.nodes[D]['polsby_popper'] = 0
+            for k in ['total_pop', 'aland', 'perim']:
+                try:
+                    self.adj.nodes[D][k] += data[k]  # add to attribute if exists
+                except:
+                    self.adj.nodes[D][k] = data[k]  # else create attribute
+
+            C = data['county']
+            self.adj.add_node(C)  # adds county node if not already present
+            for k in ['total_pop', 'seats']:
+                try:
+                    self.adj.nodes[C][k] += data[k]  # add to attribute if exists
+                except:
+                    self.adj.nodes[C][k] = data[k]  # else create attribute
+
+            self.adj.add_edge(C, D)  # create edge
+
+        # get defect targets
+        for C in self.counties:
+            self.adj.nodes[C]['whole_target']     = int(np.floor(self.adj.nodes[C]['seats']))
+            self.adj.nodes[C]['intersect_target'] = int(np.ceil (self.adj.nodes[C]['seats']))
+        nx.write_gpickle(self.adj, self.gp[src])
+            
+            
     def get_proposals(self):
         src = 'proposals'
         if self.proposal != proposal_default:
@@ -339,111 +471,3 @@ from (
         
 
 
-    def get_graphs(self, nodes_tbl, new_districts=0, node_attr=(), edge_attr=(), random_seed=0):
-        src = 'graph'
-        # what attributes will be stored in nodes & edges
-        node_attr = {'geoid', 'county', 'district', 'total_pop', 'seats', 'aland', 'perim'}.union(node_attr)
-        edge_attr = {'distance', 'shared_perim'}.union(edge_attr)
-        # retrieve node data
-        nodes_query = f'select {", ".join(node_attr)} from {self.tbl["nodes"]}'
-        nodes = run_query(nodes_query).set_index('geoid')
-
-        # get unique districts & counties
-        districts = set(nodes['district'])
-        counties  = set(nodes['county'  ])
-
-        # set random number generator for reproducibility
-        rng = np.random.default_rng(random_seed)
-
-        # find eges = pairs of nodes that border each other
-        edges_query = f"""
-select
-    *
-from (
-    select
-        x.geoid as geoid_x,
-        y.geoid as geoid_y,        
-        st_distance(x.point, y.point) as distance,
-        st_perimeter(st_intersection(x.polygon, y.polygon)) as shared_perim
-    from
-        {self.tbl['nodes']} as x,
-        {self.tbl['nodes']} as y
-    where
-        x.geoid < y.geoid
-        and st_intersects(x.polygon, y.polygon)
-    )
-where
-    shared_perim > 0.01
-"""
-        edges = run_query(edges_query)
-
-        # create graph from edges and add node attributes
-        self.graph = nx.from_pandas_edgelist(edges, source=f'geoid_x', target=f'geoid_y', edge_attr=tuple(edge_attr))
-        nx.set_node_attributes(self.graph, nodes.to_dict('index'))
-
-
-        # Check for disconnected districts & fix
-        # This is rare, but can potentially happen during county-node contraction.
-        connected = False
-        while not connected:
-            connected = True
-            for D in districts:
-                comp = get_components_district(self.graph, D)
-                if len(comp) > 1:
-                    # district disconnected - keep largest component and "dissolve" smaller ones into other contiguous districts.
-                    # May create population deviation which will be corrected during MCMC.
-                    print(f'regrouping to connect components of district {D} with component {[len(c) for c in comp]}')
-                    connected = False
-                    for c in comp[1:]:
-                        for x in c:
-                            y = rng.choice(list(self.graph.neighbors(x)))  # chose a random neighbor
-                            self.graph.nodes[x]['district'] = self.graph.nodes[y]['district']  # adopt its district
-
-        # Create new districts starting at nodes with high population
-        new_district_starts = nodes.nlargest(10 * new_districts, 'total_pop').index.tolist()
-        D_new = max(districts) + 1
-        while new_districts > 0:
-            # get most populous remaining node, make it a new district
-            # check if this disconnected its old district.  If so, undo and try next node.
-            n = new_district_starts.pop(0)
-            D_old = self.graph.nodes[n]['district']
-            self.graph.nodes[n]['district'] = D_new
-            comp = get_components_district(self.graph, D_old)
-            if len(comp) == 1:
-                # success
-                D_new += 1
-                new_districts -= 1
-            else:
-                # fail - disconnected old district - undo and try again
-                self.graph.nodes[n]['district'] = D_old
-
-
-        # Create the county-district bi-partite adjacency graph.
-        # This graph has 1 node for each county and district &
-        # an edge for all (county, district) that intersect (share land).
-        # It is an efficient tool to track map defect and other properties.
-        self.adj = nx.Graph()
-        for n, data in self.graph.nodes(data=True):
-            D = data['district']
-            self.adj.add_node(D)  # adds district node if not already present
-            self.adj.nodes[D]['polsby_popper'] = 0
-            for k in ['total_pop', 'aland', 'perim']:
-                try:
-                    self.adj.nodes[D][k] += data[k]  # add to attribute if exists
-                except:
-                    self.adj.nodes[D][k] = data[k]  # else create attribute
-
-            C = data['county']
-            self.adj.add_node(C)  # adds county node if not already present
-            for k in ['total_pop', seats]:
-                try:
-                    self.adj.nodes[C][k] += data[k]  # add to attribute if exists
-                except:
-                    v.nodes[C][k] = data[k]  # else create attribute
-
-            self.adj.add_edge(C, D)  # create edge
-
-        # get defect targets
-        for C in counties:
-            self.adj.nodes[C]['whole_target']     = int(np.floor(self.adj.nodes[C][seats]))
-            self.adj.nodes[C]['intersect_target'] = int(np.ceil (self.adj.nodes[C][seats]))

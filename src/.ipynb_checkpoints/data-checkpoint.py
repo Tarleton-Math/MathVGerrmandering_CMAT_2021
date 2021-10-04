@@ -34,8 +34,10 @@ class Data(Base):
 
     def get_proposals(self):
         src = 'proposals'
-        missing_plans = []
+        self.proposals = dict()
+        self.missing_proposals = []
         for district_type, abbr in {'cd':'c', 'sldu':'s', 'sldl':'h'}.items():
+            self.proposals[district_type] = ['enacted2010']
             proposal_path = self.path[src] / district_type
             proposal_path.mkdir(parents=True, exist_ok=True)
             os.chdir(proposal_path)
@@ -48,14 +50,16 @@ class Data(Base):
                 try:
                     urllib.request.urlopen(url)
                     not_found = 0
-                    if not f.is_file():
-                        missing_plans.append(plan)
+                    if f.is_file():
+                        self.proposals[district_type].append(plan)
+                    else:
+                        self.missing_proposals.append(plan)
                 except urllib.error.HTTPError:
                     not_found += 1
                 if not_found > 5:
                     break
         os.chdir(code_path)
-        print(f'missing plans: {missing_plans}')
+        print(f'missing proposals: {self.missing_proposals}')
 
 #####################################################################################################
 #####################################################################################################
@@ -68,7 +72,6 @@ class Data(Base):
             load_table(self.tbl[src], df=df)
             zipfile = False
         except:
-            self.path[src].mkdir(parents=True, exist_ok=True)
             os.chdir(self.path[src])
             try:
                 zipfile = zf.ZipFile(self.zp[src])
