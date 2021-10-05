@@ -65,7 +65,8 @@ class MCMC(Base):
             self.path[src] = self.gp[src].parent
 
         for src in self.Sources:
-            self.get(src)
+            if src in ('proposals', 'nodes'):
+                self.get(src)
 
 
     def get_graphs(self):
