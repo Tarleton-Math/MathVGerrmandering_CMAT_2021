@@ -2,14 +2,14 @@ proj_id   = 'cmat-315920'
 root_path = '/home/jupyter/'
 gcs_path  = 'math_for_unbiased_maps_tx'
 
-import os, pathlib, shutil, time, datetime, dataclasses, typing
+import os, pathlib, shutil, time, datetime, dataclasses, typing, google.cloud.bigquery
 import numpy as np, pandas as pd, geopandas as gpd
 
 try:
-    import google.cloud.bigquery, google.cloud.bigquery_storage
+    import google.cloud.bigquery_storage
 except:
     os.system('pip install --upgrade google-cloud-bigquery-storage')
-    import google.cloud.bigquery, google.cloud.bigquery_storage
+    import google.cloud.bigquery_storage
 
 import warnings
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
@@ -40,8 +40,15 @@ crs_area   = 'ESRI:102003'
 crs_length = 'ESRI:102005'
 # meters_per_mile = 1609.344
 concat_str = ' ... '
-join_str   = ',\n    '
 rpt_just   = 15
+
+def join_str(indents=1):
+    tab = '    '
+    return ',\n' + tab * indents
+
+def subquery(query, indents=1):
+    s = join_str(indents)[1:]
+    return query.strip().replace('\n', s)
 
 
 def listify(x=None):
@@ -113,8 +120,9 @@ class Base():
                     rpt(f'deleting {nm}')
                     delete_table(nm)
         if src in self.refresh_tbl:
-            rpt(f'deleting {tbl}')
-            delete_table(tbl)
+            if check_table(tbl):
+                rpt(f'deleting {tbl}')
+                delete_table(tbl)
 
     def get(self, src):
         rpt(f'Get {src}'.ljust(rpt_just, ' '))
@@ -123,7 +131,7 @@ class Base():
         if check_table(self.tbl[src]):
             rpt('using existing table')
         else:
-            rpt('creating table')
+            rpt('processing')
             self[f'get_{src}']()
         print(f'success!')
         os.chdir(code_path)
@@ -152,9 +160,6 @@ def extract_file(zipfile, fn, **kwargs):
     file = zipfile.extract(fn)
     return lower_cols(pd.read_csv(file, dtype=str, **kwargs))
 
-def subquery(query, indents=1):
-    s = '\n' + indents * '    '
-    return query.strip().replace('\n', s)
 
 def check_table(tbl):
     try:

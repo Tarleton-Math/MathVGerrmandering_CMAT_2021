@@ -1,5 +1,10 @@
 from . import *
 import urllib, zipfile as zf, shapely.ops
+try:
+    import mechanicalsoup
+except:
+    os.system('pip install --upgrade mechanicalsoup')
+    import mechanicalsoup
 
 @dataclasses.dataclass
 class Data(Base):
@@ -26,40 +31,45 @@ class Data(Base):
             self.path[src] = self.pq[src].parent
 
         for src in self.Sources:
-            if src != 'proposals':
-                self.get(src)
+#             if src != 'proposals':
+            self.get(src)
 
 #####################################################################################################
 #####################################################################################################
 
     def get_proposals(self):
         src = 'proposals'
-        self.proposals = dict()
-        self.missing_proposals = []
-        for district_type, abbr in {'cd':'c', 'sldu':'s', 'sldl':'h'}.items():
-            self.proposals[district_type] = ['enacted2010']
+        D = {'cd':'c', 'sldu':'s', 'sldl':'h'}
+        self.proposals_dict = {dt:list() for dt in D.keys()}
+        browser = mechanicalsoup.Browser()
+        for district_type, abbr in D.items():
             proposal_path = self.path[src] / district_type
             proposal_path.mkdir(parents=True, exist_ok=True)
             os.chdir(proposal_path)
-            os.system("unzip -u '*.zip' >/dev/null 2>&1");
             not_found = 0
+            new = 0
             for n in range(1000):
+                not_found += 1
                 plan = f'plan{abbr}{2100+n}'.lower()
-                f = proposal_path / f'{plan.upper()}.csv'
-                url = f'https://data.capitol.texas.gov/dataset/{plan}'
-                try:
-                    urllib.request.urlopen(url)
-                    not_found = 0
-                    if f.is_file():
-                        self.proposals[district_type].append(plan)
-                    else:
-                        self.missing_proposals.append(plan)
-                except urllib.error.HTTPError:
-                    not_found += 1
-                if not_found > 5:
+                zp = proposal_path / f'{plan}.zip'
+                root_url = f'https://data.capitol.texas.gov/dataset/{plan}#'
+                login_page = browser.get(root_url)
+                tag = login_page.soup.select('a')
+                for t in tag:
+                    url = t['href']
+                    if url[-8:] == '_blk.zip':
+                        not_found = 0
+                        self.proposals_dict[district_type].append(plan)
+                        if not zp.is_file():
+                            rpt(f'downloading {plan} from {url}')
+                            urllib.request.urlretrieve(url, zp)
+                            new += 1
+                if not_found > 10:
                     break
+            if new > 0:
+                os.system("unzip -u '*.zip' >/dev/null 2>&1");
         os.chdir(code_path)
-        print(f'missing proposals: {self.missing_proposals}')
+        print({key:len(val) for key, val in self.proposals_dict.items()})
 
 #####################################################################################################
 #####################################################################################################
@@ -89,10 +99,10 @@ class Data(Base):
     
     def get_all(self):
         src = 'all'
-        cols = {'A' : self.Levels + self.District_types,
+        cols = {'A' : self.District_types,
                 'C' : ['seats_cd', 'seats_sldu', 'seats_sldl', 'total_pop_prop'] + Census_columns['data'],
                 'E' : [c for c in get_cols(self.tbl['elections']) if c not in ['geoid', 'county']],
-                'S' : ['aland', 'polygon']}
+                'S' : ['aland']}
         sels = ([f'A.{c} as {c}'              for c in cols['A']] + 
                 [f'coalesce(C.{c}, 0) as {c}' for c in cols['C']] + 
                 [f'coalesce(E.{c}, 0) as {c}' for c in cols['E']] + 
@@ -100,8 +110,14 @@ class Data(Base):
         query = f"""
 select
     A.geoid,
-    max(E.county) over (partition by A.cnty) as county,
-    {join_str.join(sels)},
+    substring(A.geoid, 1, 12) as bg,
+    substring(A.geoid, 1, 11) as tract,
+    A.cntyvtd,
+    A.cnty,
+    max(E.county) over (partition by A.cnty) as county,  --workaround ... county names come from election data, but not all blocks have election data
+    {join_str().join(sels)},
+    st_simplify(S.polygon, 0) as polygon,
+    st_simplify(S.polygon, 5) as polygon_simp,
 from
     {self.tbl['assignments']} as A
 left join
@@ -250,7 +266,7 @@ pivot(
 select
     A.geoid,
     A.county,
-    {join_str.join(elections)}
+    {join_str().join(elections)}
 from
     {t} as {alias}
 """
@@ -311,7 +327,7 @@ on
             query = f"""
 select
     concat(right(concat("00", A.state), 2), right(concat("000", A.county), 3), right(concat("000000", A.tract), 6), right(concat("0000", A.block), 4)) as geoid,
-    {join_str.join(Census_columns['data'])}
+    {join_str().join(Census_columns['data'])}
 from
     {temp['geo']} as A
 inner join
@@ -350,7 +366,7 @@ order by
             query = f"""
 select
     geoid,
-    {join_str.join(Census_columns['data'])}
+    {join_str().join(Census_columns['data'])}
 from
     {tbl_raw}
 """
@@ -358,7 +374,7 @@ from
             query = f"""
 select
     E.geoid_{self.shapes_yr} as geoid,
-    {join_str.join([f'sum(D.{c} * E.aland_prop) as {c}' for c in Census_columns['data']])}
+    {join_str().join([f'sum(D.{c} * E.aland_prop) as {c}' for c in Census_columns['data']])}
 from
     {tbl_raw} as D
 inner join
@@ -481,13 +497,8 @@ order by
                 L.append(df.set_index('geoid'))
 #                 os.unlink(fn)
         df = lower(pd.concat(L, axis=1).reset_index()).sort_values('geoid')
-        c = df['geoid'].str
-        df['state']    = c[:2]
-        df['cnty']     = c[:5]
-        df['tract']    = c[:11]
-        df['bg']       = c[:12]
-        df['tabblock'] = c[:15]
-        df = df[['geoid', 'tabblock', 'bg', 'tract', 'cnty', 'cntyvtd', 'cd', 'sldu', 'sldl']]
+        df['cnty'] = df['geoid'].str[2:5]
+        df = df[['geoid', 'cntyvtd', 'cnty', 'cd', 'sldu', 'sldl']]
         rpt(f'creating table')
         load_table(self.tbl[src], df=df, preview_rows=0)
 
