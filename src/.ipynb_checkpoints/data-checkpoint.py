@@ -69,7 +69,7 @@ class Data(Base):
             if new > 0:
                 os.system("unzip -u '*.zip' >/dev/null 2>&1");
         os.chdir(code_path)
-        print({key:len(val) for key, val in self.proposals_dict.items()})
+        rpt({key:len(val) for key, val in self.proposals_dict.items()})
 
 #####################################################################################################
 #####################################################################################################

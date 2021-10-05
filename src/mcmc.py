@@ -263,7 +263,7 @@ select
     max(cntyvtd_new ) as cntyvtd,
     sum(seats       ) as seats,
     {join_str().join(data_sums)},
-    st_union_agg(polygon) as polygon,
+    st_union_agg(polygon_simp) as polygon,
     sum(aland) as aland,
 from (
     {subquery(query[-1])}
