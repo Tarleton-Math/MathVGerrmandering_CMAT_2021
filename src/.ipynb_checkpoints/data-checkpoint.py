@@ -14,7 +14,7 @@ class Data(Base):
         "office like 'USRep%' and race='general'")
         
     def __post_init__(self):
-        self.Sources = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'all', 'proposals')
+        self.Sources = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'all', 'countries', 'proposals')
         super().__post_init__()
         if len(self.refresh_tbl) > 0:
             self.refresh_tbl.add('all')
@@ -29,10 +29,53 @@ class Data(Base):
             self.pq  [src] = data_path / f'{src}/{self.state.abbr}/{stem}.parquet'
             self.zp  [src] = self.pq[src].with_suffix('.zip')
             self.path[src] = self.pq[src].parent
+        self.tbl['countries'] = f'{data_bq}.countries'
 
         for src in self.Sources:
 #             if src != 'proposals':
             self.get(src)
+
+#####################################################################################################
+#####################################################################################################
+
+    def get_countries(self):
+        src = 'countries'
+        
+        tbl_raw = self.tbl[src] + '_raw'
+        if check_table(tbl_raw):
+            rpt(f'using existing raw table')
+        else:
+            rpt(f'creating raw table')
+            import json
+            try:
+                import datapackage
+            except:
+                os.system('pip install --upgrade datapackage')
+                import datapackage
+            package = datapackage.Package('https://datahub.io/core/geo-countries/datapackage.json')
+            for resource in package.resources:
+                if resource.name == 'countries':
+                    js = json.loads(resource.raw_read())
+                    break
+            L = [{'country' :g['properties']['ADMIN'],
+                  'abbr'    :g['properties']['ISO_A3'],
+                  'geometry':str(g['geometry'])
+                 } for g in js['features']]
+            df = pd.DataFrame(L)
+            load_table(tbl_raw, df=df)
+
+        query = f"""
+select
+    country,
+    abbr,
+    st_geogfromgeojson(geometry, make_valid => TRUE) as polygon
+from
+    {tbl_raw}
+order by
+    country
+"""
+        load_table(self.tbl[src], query=query)
+        delete_table(tbl_raw)
 
 #####################################################################################################
 #####################################################################################################

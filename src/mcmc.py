@@ -1,6 +1,6 @@
 from . import *
 import networkx as nx
-proposal_default = 'enacted2010'
+proposal_default = 'plansenacted2010'
 
 ################# graph utilities #################
 
