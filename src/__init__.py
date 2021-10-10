@@ -38,7 +38,7 @@ gcs_bucket = gcsclient.get_bucket(gcs_path)
 crs_census = 'EPSG:4269'
 crs_area   = 'ESRI:102003'
 crs_length = 'ESRI:102005'
-# meters_per_mile = 1609.344
+m_per_mi = 1609.344
 concat_str = ' ... '
 rpt_just   = 15
 
