@@ -31,33 +31,53 @@ class MCMC(Base):
         self.update()
         if self.defect_cap == 0:
             self.defect_cap = self.defect
-        
-        
-    def pair_generator(self, pop_diff_exp=0):
+
+
+    def recomb(self):
+        # Make backups - used to undo rejected steps
+        self.update()
+        self.graph_backup = self.graph.copy()
+        self.adj_backup   = self.adj.copy()
+
+        def accept():
+            for dist, comp in zip(districts, components):
+                cuts = tuple((dist, cty) for cty in self.adj[dist])
+                self.adj.remove_edges_from(cuts)  # cut all edges of self.adj touching d0 or d1
+                for n in comp:
+                    self.graph.nodes[n]['district'] = dist  # relabel nodes
+                    self.adj.add_edge(dist, self.graph.nodes[n]['county'])
+
+        def reject():
+            T.add_edge(*e)  # restore e
+            self.adj = self.adj_backup.copy()  # restore self.adj
+            for n in H.nodes:
+                self.graph.nodes[n]['district'] = self.graph_backup.nodes[n]['district']
+
         # Make generator to yield district pairs in random order weighted by population difference
         # yields pairs with large pop difference first to encourage convergence to population balance.
         # To disable weighting (purely random sample), set pop_diff_exp=0
         # Make dataframe of district pairs with pop_difference raised to pop_diff_exp
-        Q = self.district_df['total_pop']
-        pop_diff = pd.DataFrame([(x, y, p-q) for x, p in Q.iteritems() for y, q in Q.iteritems() if p < q]).set_index([0,1]).squeeze()
-        pop_diff = pop_diff ** pop_diff_exp
-        def gen(pop_diff):
-            while len(pop_diff) > 0:
-                pop_diff /= pop_diff.sum()  # make pop_diff a probability vector
-                a = self.rng.choice(pop_diff.index, p=pop_diff)  # yield from remaining pairs with prefence for larger population difference
-                pop_diff.pop(a)
-                yield a
-        return gen(pop_diff)
-        
-    
-    
-    def recomb(self):
-        # Make backups - used to undo rejected steps
-        self.graph_backup = self.graph.copy()
-        self.adj_backup   = self.adj.copy()
-        self.update()
+        def gen(R):
+            while len(R) > 0:
+                p = R / R.sum()
+                r = self.rng.choice(R.index, p=p)  # yield from remaining pairs with prefence for larger population difference
+                R.pop(r)
+                yield r
         push_deviation = self.pop_deviation > self.pop_deviation_target
-        pairs = self.pair_generator(push_deviation)
+        pop_diff_exp = 2 * push_deviation
+#         P = self.district_df.set_index('district')['total_pop']
+#         Q = pd.DataFrame([(x, y, abs(p-q)) for x, p in P.iteritems() for y, q in P.iteritems() if x < y]).set_index([0,1]).squeeze()
+        
+        P = self.district_df[['district', 'total_pop']].values
+        Q = pd.DataFrame([(x, y, abs(p-q)) for x, p in P for y, q in P if x < y])
+        display(Q)
+        assert 1==2
+#         .set_index([0,1]).squeeze()
+#         Q = pd.DataFrame([(x, y, abs(p-q)) for x, p in P.iteritems() for y, q in P.iteritems() if x < y]).set_index([0,1]).squeeze()
+
+        
+        R = (Q / Q.sum()) ** pop_diff_exp
+        pairs = gen(R)
         
         while True:
             try:
@@ -66,13 +86,13 @@ class MCMC(Base):
                 rpt(f'exhausted all district pairs - I think I am stuck')
                 return False
 
-            H = district_view(self.graph, districts[0])
-            if not nx.is_connected(H):  # if H is not connect, go to next district pair
+            H = district_view(self.graph, districts)
+            if not nx.is_connected(H):  # if H not connected, go to next district pair
                 continue
 
-            P = self.district_df['total_pop']
+            P = self.district_df.set_index('district')['total_pop']
             q = P.pop(districts[0]) + P.pop(districts[1])
-            P_min, P_max = P.min(), P.max()
+            p_min, p_max = P.min(), P.max()
             # q is population of d0 & d1
             # P lists all OTHER district populations
             # So P_min & P_max are the min & max population of all districts except d0 & d1
@@ -104,26 +124,10 @@ class MCMC(Base):
                         t = q - s  # population in first component (recall q is the combined population of d0 & d1)
                         if s > t:  # ensure s < t
                             s, t = t, s
-                            
-                        pop_deviation_min = abs(min(s, P_min) - self.target_pop)
-                        pop_deviation_max = abs(max(t, P_max) - self.target_pop)
+                        pop_deviation_min = abs(min(s, p_min) - self.target_pop)
+                        pop_deviation_max = abs(max(t, p_max) - self.target_pop)
                         pop_deviation_new = (pop_deviation_min + pop_deviation_max) / self.target_pop * 100  # new pop deviation
                         
-                        def accept(components):
-                            for dist, comp in zip(districts, components):
-                                cuts = tuple((dist, cty) for cty in self.adj[dist])
-                                self.adj.remove_edges_from(cuts)  # cut all edges of self.adj touching d0 or d1
-                                for n in comp:
-                                    self.graph.nodes[n]['district'] = dist  # relabel nodes
-                                    self.adj.add_edge(dist, self.graph.nodes[n]['county'])
-
-                        def reject():
-                            T.add_edge(*e)  # restore e
-                            self.adj = self.adj_backup.copy()  # restore self.adj
-                            for comp in components:
-                                for n in comp:
-                                    self.graph.nodes[n]['district'] = self.graph_backup.nodes[n]['district']
-                                    
                         # Phase 1: If pop_deviation too high, reject steps that increase it
                         if push_deviation:
                             if pop_deviation_new > self.pop_deviation:
@@ -136,7 +140,7 @@ class MCMC(Base):
                                 continue
 
                         components = get_components(T)
-                        accept(components)
+                        accept()
                          # if we've seen that plan recently, reject and try again
                         h = get_hash(self.graph)
                         if h in self.hash_rec[-self.yolo_length:]:
@@ -145,12 +149,13 @@ class MCMC(Base):
 
                         # if defect exceeds cap, reject and try again
                         old_defect = self.defect
-                        self.update()
+                        self.get_county_stats()
                         if self.defect > self.defect_cap and self.defect > old_defect:
                             reject()
-                            self.update()
+                            self.get_county_stats()
                             continue
 
+                        self.update()
                         assert abs(self.pop_deviation - pop_deviation_new) < 1e-2, f'disagreement betwen pop_deviation calculations {self.pop_deviation} v {pop_deviation_new}'
 
                         # We found a good cut edge & made 2 new districts.  They will be label with the values of d0 & d1.
@@ -166,18 +171,10 @@ class MCMC(Base):
                                     s += ds
                                 else:
                                     s -= ds
-
-                        
-                        
-#                         x = H.nodes(data=True)
-#                         s = (sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]==d0) -
-#                              sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]!=d0) +
-#                              sum(x[n]['aland'] for n in comp[1] if x[n][self.district_type]==d1) -
-#                              sum(x[n]['aland'] for n in comp[1] if x[n][self.district_type]!=d1))
                         if s < 0:
                             components[0], components[1] = components[1], components[0]
-                            accept(components)
-                        self.update()
+                            accept()
+                            self.update()
                         return True    
 
         
