@@ -63,7 +63,6 @@ class Data(Base):
                  } for g in js['features']]
             df = pd.DataFrame(L)
             load_table(tbl_raw, df=df)
-
         query = f"""
 select
     country,
@@ -82,18 +81,17 @@ order by
 
     def get_proposals(self):
         src = 'proposals'
-        D = {'cd':'c', 'sldu':'s', 'sldl':'h'}
-        self.proposals_dict = {dt:list() for dt in D.keys()}
+        self.proposals_dict = {dt:list() for dt in self.District_types.values()}
         browser = mechanicalsoup.Browser()
-        for district_type, abbr in D.items():
-            proposal_path = self.path[src] / district_type
-            proposal_path.mkdir(parents=True, exist_ok=True)
-            os.chdir(proposal_path)
+        for abbr, district_type in self.District_types.items():
             not_found = 0
             new = 0
             for n in range(1000):
                 not_found += 1
                 plan = f'plan{abbr}{2100+n}'.lower()
+                proposal_path = self.path[src] / f'{district_type}/{plan}'
+                proposal_path.mkdir(parents=True, exist_ok=True)
+                os.chdir(proposal_path)
                 zp = proposal_path / f'{plan}.zip'
                 root_url = f'https://data.capitol.texas.gov/dataset/{plan}#'
                 login_page = browser.get(root_url)
@@ -104,13 +102,12 @@ order by
                         not_found = 0
                         self.proposals_dict[district_type].append(plan)
                         if not zp.is_file():
-                            rpt(f'downloading {plan} from {url}')
+                            print(f'downloading {plan}')
                             urllib.request.urlretrieve(url, zp)
+                            os.system("unzip -u '*.zip' >/dev/null 2>&1");
                             new += 1
-                if not_found > 10:
+                if not_found > 30:
                     break
-            if new > 0:
-                os.system("unzip -u '*.zip' >/dev/null 2>&1");
         os.chdir(code_path)
         rpt({key:len(val) for key, val in self.proposals_dict.items()})
 
@@ -142,7 +139,7 @@ order by
     
     def get_all(self):
         src = 'all'
-        cols = {'A' : self.District_types,
+        cols = {'A' : self.District_types.values(),
                 'C' : ['seats_cd', 'seats_sldu', 'seats_sldl', 'total_pop_prop'] + Census_columns['data'],
                 'E' : [c for c in get_cols(self.tbl['elections']) if c not in ['geoid', 'county']],
                 'S' : ['aland']}
@@ -500,7 +497,7 @@ order by
         query = f"""
 select
     geoid,
-    cast(aland as float64) as aland,
+    cast(aland as float64) / {m_per_mi**2} as aland,
     st_geogfrom(geometry) as polygon
 from
     {tbl_raw}

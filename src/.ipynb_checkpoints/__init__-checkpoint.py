@@ -3,7 +3,7 @@ root_path = '/home/jupyter/'
 gcs_path  = 'math_for_unbiased_maps_tx'
 
 import os, pathlib, shutil, time, datetime, dataclasses, typing, google.cloud.bigquery
-import numpy as np, pandas as pd, geopandas as gpd
+import numpy as np, pandas as pd, geopandas as gpd, networkx as nx
 
 try:
     import google.cloud.bigquery_storage
@@ -78,7 +78,7 @@ class Base():
     shapes_yr    : int = 2020
     census_yr    : int = 2020
     level        : str = 'cntyvtd'
-    district_type: str = 'cd'
+#     district_type: str = 'cd'
     seats        : typing.Dict  = default_factory({'cd':38, 'sldu':31, 'sldl':150})
     refresh_tbl  : typing.Set = default_set()
     refresh_all  : typing.Set = default_set()
@@ -92,7 +92,8 @@ class Base():
     def __post_init__(self):
         self.Years          = (2020, 2010)
         self.Levels         = ('cntyvtd', 'tabblock', 'bg', 'tract', 'cnty')
-        self.District_types = ('cd', 'sldu', 'sldl')
+#         self.District_types = ('cd', 'sldu', 'sldl')
+        self.District_types = {'c':'cd', 's':'sldu', 'h':'sldl'}
         self.refresh_all = setify(self.refresh_all)
         self.refresh_tbl = setify(self.refresh_tbl).union(setify(self.refresh_all))
         self.state = states[states['abbr']==self.abbr].iloc[0]
@@ -100,7 +101,7 @@ class Base():
         D = {'census_yr'    :self.Years,
              'shapes_yr'    :self.Years,
              'level'        :self.Levels,
-             'district_type':self.District_types,
+             'district_type':tuple(self.District_types.values()),
              'refresh_all'  :self.Sources,
              'refresh_tbl'  :self.Sources,
             }
@@ -113,7 +114,7 @@ class Base():
     def delete_for_refresh(self, src):
         tbl = self.tbl[src]
         if src in self.refresh_all:
-            shutil.rmtree(self.path[src], ignore_errors=True)
+#             shutil.rmtree(self.path[src], ignore_errors=True)
             for t in bqclient.list_tables(data_bq):
                 nm = t.full_table_id.replace(':', '.')
                 if self.tbl[src] in nm:
@@ -212,6 +213,34 @@ def load_table(tbl, df=None, query=None, file=None, overwrite=True, preview_rows
     if preview_rows > 0:
         head(tbl, preview_rows)
     return tbl
+
+################# graph utilities #################
+
+def get_components(G):
+    # get and sorted connected components by size
+    return sorted([tuple(x) for x in nx.connected_components(G)], key=lambda x:len(x), reverse=True)
+
+def district_view(G, D):
+    # get subgraph of a given district
+    return nx.subgraph_view(G, lambda n: G.nodes[n]['district'] == D)
+
+def get_components_district(G, D):
+    # get connected components of a district
+    return get_components(district_view(G, D))
+
+def get_hash(G):
+    # Partition hashing provides a unique integer label for each distinct plan
+    # For each district, get sorted tuple of nodes it contains.  Then sort this tuple of tuples.
+    # Produces a sorted tuple of sorted tuples called "partition" that does not care about:
+    # permutations of the nodes within a district OR permutations of the district labels.
+    # WARNING - Python inserts randomness into its hash function for security reasons.
+    # However, this means the same partition gets a different hash in different runs.
+    # The first lines of this .py file fix this issue by setting the hashseen
+    # But this solution does NOT work in a Jupyter notebook, AFAIK.
+    # I have not found a way to force deterministic hashing in Jupyter.
+    districts = set(d for n, d in G.nodes(data='district'))
+    partition = tuple(sorted(tuple(sorted(district_view(G, D).nodes)) for D in districts))
+    return partition.__hash__()
 
 
 def get_states():
