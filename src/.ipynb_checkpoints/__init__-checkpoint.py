@@ -223,7 +223,7 @@ def load_table(tbl, df=None, query=None, file=None, overwrite=True, preview_rows
 
 ################# graph utilities #################
 def dict_to_df(D):
-    return pd.DataFrame.from_dict(D, orient='index')
+    return pd.DataFrame.from_dict(D, orient='index').sort_index()
 
 def graph_to_df(G, index_name='geoid', index_position=2, attr=None):
     if attr is None:
@@ -234,17 +234,31 @@ def graph_to_df(G, index_name='geoid', index_position=2, attr=None):
     df.insert(index_position, index_name, df.index)
     return df.reset_index(drop=True)
 
-def get_components(G):
-    # get and sorted connected components by size
-    return sorted([tuple(x) for x in nx.connected_components(G)], key=lambda x:len(x), reverse=True)
+def sorter(L, sort=True):
+    if sort:
+        L = tuple(sorted((tuple(sorted(x)) for x in L), key=lambda x: (len(x), x)))
+    return L
+
+def get_edges(G, sort=True):
+    return sorter(G.edges, sort)
+
+def get_components(G, sort=True):
+    return sorter(nx.connected_components(G), sort)
+    
+def get_partition(G, sort=True):
+    districts = set(d for n, d in G.nodes(data='district'))
+    return sorter((district_view(G, D).nodes for D in districts), sort)    
 
 def district_view(G, D):
-    # get subgraph of a given district
-    return nx.subgraph_view(G, lambda n: G.nodes[n]['district'] == D)
+    # get subgraph of given districts
+    if isinstance(D, int):
+        return nx.subgraph_view(G, lambda n: G.nodes[n]['district'] == D)
+    else:
+        return nx.subgraph_view(G, lambda n: G.nodes[n]['district'] in D)
 
-def get_components_district(G, D):
-    # get connected components of a district
-    return get_components(district_view(G, D))
+def get_components_district(G, D, sort=True):
+    # get connected components given districts
+    return get_components(district_view(G, D, sort))
 
 def get_hash(G):
     # Partition hashing provides a unique integer label for each distinct plan
@@ -256,9 +270,7 @@ def get_hash(G):
     # The first lines of this .py file fix this issue by setting the hashseen
     # But this solution does NOT work in a Jupyter notebook, AFAIK.
     # I have not found a way to force deterministic hashing in Jupyter.
-    districts = set(d for n, d in G.nodes(data='district'))
-    partition = tuple(sorted(tuple(sorted(district_view(G, D).nodes)) for D in districts))
-    return partition.__hash__()
+    return get_partition(G).__hash__()
 
 
 def get_states():
