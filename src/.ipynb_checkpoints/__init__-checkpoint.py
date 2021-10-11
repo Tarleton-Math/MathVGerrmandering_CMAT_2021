@@ -157,6 +157,13 @@ def lower(df):
     else:
         return df
 
+
+def time_formatter(t):
+    h, m = divmod(t, 3600)
+    m, s = divmod(m, 60)
+    return f'{int(h)}hrs {int(m)}min {s:.2f}sec'
+
+    
 def extract_file(zipfile, fn, **kwargs):
     file = zipfile.extract(fn)
     return lower_cols(pd.read_csv(file, dtype=str, **kwargs))
@@ -215,6 +222,17 @@ def load_table(tbl, df=None, query=None, file=None, overwrite=True, preview_rows
     return tbl
 
 ################# graph utilities #################
+def dict_to_df(D):
+    return pd.DataFrame.from_dict(D, orient='index')
+
+def graph_to_df(G, index_name='geoid', index_position=2, attr=None):
+    if attr is None:
+        D = {n: d for n, d in G.nodes(data=True)}
+    else:
+        D = {n: {x: d[x] for x in attr if x in d.keys()} for n, d in G.nodes(data=True)}
+    df = dict_to_df(D)
+    df.insert(index_position, index_name, df.index)
+    return df.reset_index(drop=True)
 
 def get_components(G):
     # get and sorted connected components by size
@@ -315,10 +333,6 @@ except:
 # #     s = '\n' + indents * '    '
 # #     return query.strip().replace('\n', s)
 
-# # def time_formatter(t):
-# #     h, m = divmod(t, 3600)
-# #     m, s = divmod(m, 60)
-# #     return f'{int(h)}hrs {int(m)}min {s:.2f}sec'
 
 # # def yr_to_congress(yr):
 # #     return min(116, int(yr-1786)/2)
