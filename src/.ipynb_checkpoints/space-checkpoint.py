@@ -13,8 +13,6 @@ class Space(Base):
         self.Sources = ('proposal', 'nodes', 'graph')
         super().__post_init__()
         self.district_type = self.District_types[self.proposal[4]]
-        
-
         stem = f'{self.state.abbr}_{self.district_type}_{self.proposal}'
         self.dataset = f'{root_bq}.{stem}'
         bqclient.create_dataset(self.dataset , exists_ok=True)
@@ -61,7 +59,7 @@ from (
         x.geoid as geoid_x,
         y.geoid as geoid_y,        
         st_distance(x.point, y.point) / {m_per_mi} as distance,
-        st_perimeter(st_intersection(x.polygon, y.polygon)) / {m_per_mi} as shared_perim
+        (x.perim + y.perim - st_perimeter(st_union(x.polygon, y.polygon))/{m_per_mi}) / 2  as shared_perim
     from
         {self.tbl['nodes']} as x,
         {self.tbl['nodes']} as y
@@ -70,7 +68,7 @@ from (
         and st_intersects(x.polygon, y.polygon)
     )
 where
-    shared_perim > 0.001
+    shared_perim > 0.05
 """
         edges = run_query(edges_query)
 
@@ -117,7 +115,6 @@ where
                     # fail - disconnected old district - undo and try again
                     self.graph.nodes[n]['district'] = D_old
         nx.write_gpickle(self.graph, self.gpickle)
-
             
             
     def get_proposal(self):

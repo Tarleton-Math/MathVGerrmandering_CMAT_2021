@@ -6,12 +6,14 @@ class MCMC(Base):
     random_seed          : int = 0
     max_steps            : int = 5
     report_period        : int = 1
+    save_period          : int = 2
     pop_deviation_target : float = 10.0
     yolo_length          : int = 10
     defect_cap           : int = 0
+        
     
     def __post_init__(self):
-        self.Sources = ('adjs')
+        self.Sources = ('plan', 'county', 'district', 'summary')
         super().__post_init__()
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
@@ -19,7 +21,8 @@ class MCMC(Base):
         self.gpickle = pathlib.Path(self.gpickle)
         s = '_'
         w = self.gpickle.stem.split(s)
-        self.stem = f'{root_bq}.{s.join(w[0:3])}.{s.join(w[3:5])}'
+        stem = f'{root_bq}.{s.join(w[0:3])}.{s.join(w[3:5])}'
+        self.tbls = {f'{src}_rec': f'{stem}_{self.random_seed}_{src}' for src in self.Sources}#, 'params']}
         
         self.graph = nx.read_gpickle(self.gpickle)
         self.districts  = sorted({d for x, d in self.graph.nodes(data='district')})
@@ -31,6 +34,80 @@ class MCMC(Base):
         self.update()
         if self.defect_cap == 0:
             self.defect_cap = self.defect
+        
+        
+    def save_results(self):
+        self.report()
+        print('saving')
+        for src, tbl in self.tbls.items():
+            saved = False
+            for i in range(1, 60):
+                try:
+                    load_table(tbl=tbl, df=pd.concat(self[src], axis=0), overwrite=self.overwrite_tbl)
+                    self[src] = list()
+                    saved = True
+                    break
+                except:
+                    time.sleep(1)
+            assert saved, f'I tried to write the result of random_seed {self.random_seed} {i} times without success - giving up'
+        self.overwrite_tbl = False
+
+    
+    def run_chain(self):
+        self.plan = 0
+        self.update()
+        self.overwrite_tbl = True
+        self.record()
+        self.start_time = time.time()
+        while self.plan < self.max_steps:
+            self.plan += 1
+            msg = f"random_seed {self.random_seed} step {self.plan} pop_deviation={self.pop_deviation:.1f}"
+            if self.recomb():
+                self.record()
+                if self.plan % self.report_period == 0:
+                    self.report()
+                if self.plan % self.save_period == 0:
+                    self.save_results()
+            else:
+                rpt(msg)
+                break
+        self.save_results()
+        self.report()
+        print(f'random_seed {self.random_seed} done')
+
+
+    def update(self):
+        for G in [self.graph, self.adj]:
+            for a in ['random_seed', 'plan']:
+                nx.set_node_attributes(G, self[a], a)
+        self.hash = get_hash(self.graph)
+        self.get_county_stats()
+        self.get_district_stats()
+        self.plan_df = graph_to_df(self.graph, 'geoid', attr=('random_seed', 'plan', 'district'))
+        H = self.adj.subgraph(self.counties)
+        self.county_df = graph_to_df(H, 'county', attr=('random_seed', 'plan', 'whole_defect', 'intersect_defect', 'defect'))
+        H = self.adj.subgraph(self.districts)
+        self.district_df =  graph_to_df(H, 'district', attr=('random_seed', 'plan', 'total_pop', 'pop_deviation', 'polsby_popper', 'aland'))
+        attr = ['random_seed', 'plan', 'hash', 'polsby_popper', 'pop_deviation', 'intersect_defect', 'whole_defect', 'defect']
+        self.summary_df = pd.DataFrame([{a:self[a] for a in attr}])
+
+    
+    def record(self):
+        self.update()
+        for a in ['plan', 'county', 'district', 'summary', 'hash']:
+            r = f'{a}_rec'
+            if a == 'hash':
+                X = self.hash
+            else:
+                X = self[f'{a}_df'].copy()
+            try:
+                self[r].append(X)
+            except:
+                self[r] = [X]
+
+
+    def report(self):
+        print(f'random_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_deviation={self.pop_deviation:.1f}, intersect_defect={self.intersect_defect}, whole_defect={self.whole_defect}, defect={self.defect}', flush=True)
 
 
     def recomb(self):
@@ -65,17 +142,8 @@ class MCMC(Base):
                 yield r
         push_deviation = self.pop_deviation > self.pop_deviation_target
         pop_diff_exp = 2 * push_deviation
-#         P = self.district_df.set_index('district')['total_pop']
-#         Q = pd.DataFrame([(x, y, abs(p-q)) for x, p in P.iteritems() for y, q in P.iteritems() if x < y]).set_index([0,1]).squeeze()
-        
         P = self.district_df[['district', 'total_pop']].values
-        Q = pd.DataFrame([(x, y, abs(p-q)) for x, p in P for y, q in P if x < y])
-        display(Q)
-        assert 1==2
-#         .set_index([0,1]).squeeze()
-#         Q = pd.DataFrame([(x, y, abs(p-q)) for x, p in P.iteritems() for y, q in P.iteritems() if x < y]).set_index([0,1]).squeeze()
-
-        
+        Q = pd.DataFrame([(x, y, abs(p-q)) for x, p in P for y, q in P if x < y]).set_index([0,1]).squeeze()
         R = (Q / Q.sum()) ** pop_diff_exp
         pairs = gen(R)
         
@@ -115,7 +183,7 @@ class MCMC(Base):
                     B = nx.edge_betweenness_centrality(T)
                     B = sorted(B.items(), key=lambda x:x[1], reverse=True)  # sort edges on betweenness-centrality (largest first)
                     for e, bw_centrality in B:
-                        if bw_centrality < 0.01: # We exhausted all good edges - move on to next tree
+                        if bw_centrality < 0.1: # We exhausted all good edges - move on to next tree
                             break
                         T.remove_edge(*e)
                         components = get_components(T, sort=False)  # T nows has 2 components
@@ -124,8 +192,8 @@ class MCMC(Base):
                         t = q - s  # population in first component (recall q is the combined population of d0 & d1)
                         if s > t:  # ensure s < t
                             s, t = t, s
-                        pop_deviation_min = abs(min(s, p_min) - self.target_pop)
-                        pop_deviation_max = abs(max(t, p_max) - self.target_pop)
+                        pop_deviation_min = self.target_pop - min(s, p_min)
+                        pop_deviation_max = max(t, p_max) - self.target_pop
                         pop_deviation_new = (pop_deviation_min + pop_deviation_max) / self.target_pop * 100  # new pop deviation
                         
                         # Phase 1: If pop_deviation too high, reject steps that increase it
@@ -147,7 +215,7 @@ class MCMC(Base):
                             reject()
                             continue
 
-                        # if defect exceeds cap, reject and try again
+#                         if defect exceeds cap, reject and try again
                         old_defect = self.defect
                         self.get_county_stats()
                         if self.defect > self.defect_cap and self.defect > old_defect:
@@ -175,75 +243,9 @@ class MCMC(Base):
                             components[0], components[1] = components[1], components[0]
                             accept()
                             self.update()
-                        return True    
+                        return True
 
         
-        
-        
-    def update(self):
-        for G in [self.graph, self.adj]:
-            for a in ['random_seed', 'plan']:
-                nx.set_node_attributes(G, self[a], a)
-        self.hash = get_hash(self.graph)
-        self.get_county_stats()
-        self.get_district_stats()
-        self.plan_df = graph_to_df(self.graph, 'geoid', attr=('random_seed', 'plan', 'district'))
-        H = self.adj.subgraph(self.counties)
-        self.county_df = graph_to_df(H, 'county', attr=('random_seed', 'plan', 'whole_defect', 'intersect_defect', 'defect'))
-        H = self.adj.subgraph(self.districts)
-        self.district_df =  graph_to_df(H, 'district', attr=('random_seed', 'plan', 'total_pop', 'pop_deviation', 'polsby_popper', 'aland'))
-        attr = ['random_seed', 'plan', 'hash', 'polsby_popper', 'pop_deviation', 'intersect_defect', 'whole_defect', 'defect']
-        self.summary_df = pd.DataFrame([{a:self[a] for a in attr}])
-
-    
-    def record(self):
-        self.update()
-        for a in ['plan', 'county', 'district', 'summary', 'hash']:
-            r = f'{a}_rec'
-            if a == 'hash':
-                X = self.hash
-            else:
-                X = self[f'{a}_df'].copy()
-            try:
-                self[r].append(X)
-            except:
-                self[r] = [X]
-
-
-    def report(self):
-        print(f'random_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_deviation={self.pop_deviation:.1f}, intersect_defect={self.intersect_defect}, whole_defect={self.whole_defect}', flush=True)
-
-    
-    def run_chain(self):
-        self.plan = 0
-        self.update()
-        self.defect_init = self.defect
-        self.overwrite_tbl = True
-        self.record()
-        self.start_time = time.time()
-        while self.plan < self.max_steps:
-            self.plan += 1
-            msg = f"random_seed {self.random_seed} step {self.plan} pop_deviation={self.pop_deviation:.1f}"
-            if self.recomb():
-                self.record()
-                if self.plan % self.report_period == 0:
-                    self.report()
-#                 if self.plan % self.save_period == 0:
-#                     self.save_results()
-#                 if self.pop_deviation_stop:
-#                     if self.pop_deviation < self.pop_deviation_target:
-#                         break
-            else:
-                rpt(msg)
-                break
-#         self.save_results()
-        self.report()
-        print(f'random_seed {self.random_seed} done')
-        
-        
-        
-
-
     def get_county_stats(self):
         # The "county-line" rule prefers minimal county & district splitting. We implement as follows:
         # seats_share = county population / distrinct ideal population

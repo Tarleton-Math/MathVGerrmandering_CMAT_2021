@@ -28,28 +28,16 @@ results_path = root_path / 'redistricting_results'
 root_bq  = proj_id
 data_bq  = root_bq  + '.redistricting_data'
 results_bq  = root_bq  + '.redistricting_results'
-
 bqclient.create_dataset(data_bq , exists_ok=True)
-gcs_bucket = gcsclient.get_bucket(gcs_path)
-
+# gcs_bucket = gcsclient.get_bucket(gcs_path)
 
 # https://gis.stackexchange.com/questions/27702/what-is-the-srid-of-census-gov-shapefiles
-# crs_census = 'NAD83'
 crs_census = 'EPSG:4269'
 crs_area   = 'ESRI:102003'
 crs_length = 'ESRI:102005'
 m_per_mi = 1609.344
 concat_str = ' ... '
 rpt_just   = 15
-
-def join_str(indents=1):
-    tab = '    '
-    return ',\n' + tab * indents
-
-def subquery(query, indents=1):
-    s = join_str(indents)[1:]
-    return query.strip().replace('\n', s)
-
 
 def listify(x=None):
     if x is None:
@@ -78,7 +66,6 @@ class Base():
     shapes_yr    : int = 2020
     census_yr    : int = 2020
     level        : str = 'cntyvtd'
-#     district_type: str = 'cd'
     seats        : typing.Dict  = default_factory({'cd':38, 'sldu':31, 'sldl':150})
     refresh_tbl  : typing.Set = default_set()
     refresh_all  : typing.Set = default_set()
@@ -92,7 +79,6 @@ class Base():
     def __post_init__(self):
         self.Years          = (2020, 2010)
         self.Levels         = ('cntyvtd', 'tabblock', 'bg', 'tract', 'cnty')
-#         self.District_types = ('cd', 'sldu', 'sldl')
         self.District_types = {'c':'cd', 's':'sldu', 'h':'sldl'}
         self.refresh_all = setify(self.refresh_all)
         self.refresh_tbl = setify(self.refresh_tbl).union(setify(self.refresh_all))
@@ -114,7 +100,7 @@ class Base():
     def delete_for_refresh(self, src):
         tbl = self.tbl[src]
         if src in self.refresh_all:
-#             shutil.rmtree(self.path[src], ignore_errors=True)
+            shutil.rmtree(self.path[src], ignore_errors=True)
             for t in bqclient.list_tables(data_bq):
                 nm = t.full_table_id.replace(':', '.')
                 if self.tbl[src] in nm:
@@ -157,17 +143,22 @@ def lower(df):
     else:
         return df
 
-
 def time_formatter(t):
     h, m = divmod(t, 3600)
     m, s = divmod(m, 60)
     return f'{int(h)}hrs {int(m)}min {s:.2f}sec'
-
     
 def extract_file(zipfile, fn, **kwargs):
     file = zipfile.extract(fn)
     return lower_cols(pd.read_csv(file, dtype=str, **kwargs))
 
+def join_str(indents=1):
+    tab = '    '
+    return ',\n' + tab * indents
+
+def subquery(query, indents=1):
+    s = join_str(indents)[1:]
+    return query.strip().replace('\n', s)
 
 def check_table(tbl):
     try:
@@ -258,7 +249,7 @@ def district_view(G, D):
 
 def get_components_district(G, D, sort=True):
     # get connected components given districts
-    return get_components(district_view(G, D, sort))
+    return get_components(district_view(G, D))
 
 def get_hash(G):
     # Partition hashing provides a unique integer label for each distinct plan
@@ -292,174 +283,7 @@ except:
     print('getting states')
     states = get_states()
 
-
-
-
-
-
-# def to_gcs(file):
-#     gcs_bucket.blob(str(file).replace(str(root_path)+'/', '')).upload_from_filename(file)
-
-    
-# def check_level(level):
-#     assert level in Levels, f"level must be one of {Levels}, got {level}"
-
-# def check_district_type(district_type):
-#     assert district_type in District_types, f"district must be one of {District_types}, got {district_type}"
-
-# def check_year(year):
-#     assert year in Years, f"year must be one of {Years}, got {year}"
-
-# def check_group(group):
-#     assert group in Groups, f"group must be one of {Groups}, got {group}"
-    
-# def lower_cols(df):
-#     df.rename(columns = {x:str(x).lower() for x in df.columns}, inplace=True)
-#     return df
-
-# def lower(df):
-#     if isinstance(df, pd.Series):
-#         try:
-#             return df.str.lower()
-#         except:
-#             return df
-#     elif isinstance(df, pd.DataFrame):
-#         lower_cols(df)
-#         return df.apply(lower)
-#     else:
-#         return df
-
-
-# def rjust(col):
-#     c = col.astype(str)
-#     d = c.apply(len).max()
-#     return c.str.rjust(d, '0')
-    
-
-
-# def join_str(k=1):
-#     tab = '    '
-#     return ',\n' + k * tab
-
-# # def subquery(query, indents=1):
-# #     s = '\n' + indents * '    '
-# #     return query.strip().replace('\n', s)
-
-
-# # def yr_to_congress(yr):
-# #     return min(116, int(yr-1786)/2)
-
-# def get_states():
-#     query = f"""
-# select
-#     state_fips_code as fips
-#     , state_postal_abbreviation as abbr
-#     , state_name as name
-# from
-#     bigquery-public-data.census_utility.fips_codes_states
-# where
-#     state_fips_code <= '56'
-# """
-#     return lower_cols(run_query(query)).set_index('name')
-
-# try:
-#     states
-# except:
-#     print('getting states')
-#     states = get_states()
-
-# @dataclasses.dataclass
-# class Base():
-#     def __getitem__(self, key):
-#         return self.__dict__[key]
-
-#     def __setitem__(self, key, val):
-#         self.__dict__[key] = val
-
-
-# @dataclasses.dataclass
-# class Variable(Base):
-#     n     : typing.Any
-#     name  : str = 'variable'
-#     level : str = 'tabblock'
-
-#     def __post_init__(self):
-#         self.path = data_path / f'{self.name}/{self.n.state.abbr}'
-#         a = f'{self.name}_{self.n.state.abbr}'
-#         b = f'{a}_{self.yr}'
-#         c = f'{b}_{self.level}'
-#         self.zip     = self.path / f'{b}.zip'
-#         self.pq      = self.path / f'{b}.parquet'
-#         self.raw     = f'{data_bq}.{b}_raw'
-#         self.tbl     = f'{data_bq}.{c}'
-#         self.get()
-#         os.chdir(code_path)
-#         print(f'success')
-        
-#     def tbl_to_file(self, tbl=None):
-#         if tbl is None:
-#             tbl = self.tbl
-#         return self.path / tbl.split('.')[-1]
-        
-#     def save_tbl(self, tbl=None):
-#         if tbl is None:
-#             tbl = self.tbl
-#         rpt(f'saving table')
-#         rpt('reading')
-#         self.df = read_table(tbl=tbl)
-#         rpt('to parquet')
-#         self.df.to_parquet(self.pq)
-# #         rpt('to csv')
-# #         self.csv = self.pq.with_suffix('.csv')
-# #         self.df.to_csv(self.csv)
-#         rpt('to gcs')
-#         to_gcs(self.pq)
-# #         to_gcs(self.csv)
-        
-#     def get_zip(self):
-#         try:
-#             self.zipfile = zf.ZipFile(self.zip)
-#             rpt(f'zip exists')
-#         except:
-#             try:
-#                 rpt(f'getting zip from {self.url}')
-#                 self.zipfile = zf.ZipFile(urllib.request.urlretrieve(self.url, self.zip)[0])
-#                 to_gcs(self.zip)
-#                 rpt(f'finished{concat_str}processing')
-#             except urllib.error.HTTPError:
-#                 raise Exception(f'n\nFAILED - BAD URL {self.url}\n\n')
-
-
-#     def get(self):
-#         rpt(f"Get {self.tbl.split('.')[-1]}".ljust(33, ' '))
-#         if self.name in self.n.refresh_tbl:
-#             delete_table(self.tbl)
-            
-#         if self.name in self.n.refresh_all:
-#             delete_table(self.raw)
-#             shutil.rmtree(self.path, ignore_errors=True)
-    
-#         self.path.mkdir(parents=True, exist_ok=True)
-#         os.chdir(self.path)
-#         exists = dict()
-#         exists['df'] = hasattr(self, 'df')
-#         if exists['df']:
-#             rpt(f'dataframe exists')
-        
-#         exists['tbl'] = check_table(self.tbl)
-#         if exists['tbl']:
-#             rpt(f'{self.level} table exists')
-#         else:
-#             exists['raw'] = check_table(self.raw)
-#             if exists['raw']:
-#                 rpt(f'raw table exists')
-#         return exists
-
-# ############################################################################################################
-    
-
-    
-
+################# Census definitions #################
 Census_columns = {'joins':  ['fileid', 'stusab', 'chariter', 'cifsn', 'logrecno']}
 
 Census_columns['geo'] = ({'name':'fileid', 'field_type':'string'}, {'name':'stusab', 'field_type':'string'}, {'name':'sumlev', 'field_type':'string'}, {'name':'geovar', 'field_type':'string'}, {'name':'geocomp', 'field_type':'string'}, {'name':'chariter', 'field_type':'string'}, {'name':'cifsn', 'field_type':'string'}, {'name':'logrecno', 'field_type':'integer'}, {'name':'geoid', 'field_type':'string'}, {'name':'geocode', 'field_type':'string'}, {'name':'region', 'field_type':'string'}, {'name':'division', 'field_type':'string'}, {'name':'state', 'field_type':'string'}, {'name':'statens', 'field_type':'string'}, {'name':'county', 'field_type':'string'}, {'name':'countycc', 'field_type':'string'}, {'name':'countyns', 'field_type':'string'}, {'name':'cousub', 'field_type':'string'}, {'name':'cousubcc', 'field_type':'string'}, {'name':'cousubns', 'field_type':'string'}, {'name':'submcd', 'field_type':'string'}, {'name':'submcdcc', 'field_type':'string'}, {'name':'submcdns', 'field_type':'string'}, {'name':'estate', 'field_type':'string'}, {'name':'estatecc', 'field_type':'string'}, {'name':'estatens', 'field_type':'string'}, {'name':'concit', 'field_type':'string'}, {'name':'concitcc', 'field_type':'string'}, {'name':'concitns', 'field_type':'string'}, {'name':'place', 'field_type':'string'}, {'name':'placecc', 'field_type':'string'}, {'name':'placens', 'field_type':'string'}, {'name':'tract', 'field_type':'string'}, {'name':'blkgrp', 'field_type':'string'}, {'name':'block', 'field_type':'string'}, {'name':'aianhh', 'field_type':'string'}, {'name':'aihhtli', 'field_type':'string'}, {'name':'aianhhfp', 'field_type':'string'}, {'name':'aianhhcc', 'field_type':'string'}, {'name':'aianhhns', 'field_type':'string'}, {'name':'aits', 'field_type':'string'}, {'name':'aitsfp', 'field_type':'string'}, {'name':'aitscc', 'field_type':'string'}, {'name':'aitsns', 'field_type':'string'}, {'name':'ttract', 'field_type':'string'}, {'name':'tblkgrp', 'field_type':'string'}, {'name':'anrc', 'field_type':'string'}, {'name':'anrccc', 'field_type':'string'}, {'name':'anrcns', 'field_type':'string'}, {'name':'cbsa', 'field_type':'string'}, {'name':'memi', 'field_type':'string'}, {'name':'csa', 'field_type':'string'}, {'name':'metdiv', 'field_type':'string'}, {'name':'necta', 'field_type':'string'}, {'name':'nmemi', 'field_type':'string'}, {'name':'cnecta', 'field_type':'string'}, {'name':'nectadiv', 'field_type':'string'}, {'name':'cbsapci', 'field_type':'string'}, {'name':'nectapci', 'field_type':'string'}, {'name':'ua', 'field_type':'string'}, {'name':'uatype', 'field_type':'string'}, {'name':'ur', 'field_type':'string'}, {'name':'cd116', 'field_type':'string'}, {'name':'cd118', 'field_type':'string'}, {'name':'cd119', 'field_type':'string'}, {'name':'cd120', 'field_type':'string'}, {'name':'cd121', 'field_type':'string'}, {'name':'sldu18', 'field_type':'string'}, {'name':'sldu22', 'field_type':'string'}, {'name':'sldu24', 'field_type':'string'}, {'name':'sldu26', 'field_type':'string'}, {'name':'sldu28', 'field_type':'string'}, {'name':'sldl18', 'field_type':'string'}, {'name':'sldl22', 'field_type':'string'}, {'name':'sldl24', 'field_type':'string'}, {'name':'sldl26', 'field_type':'string'}, {'name':'sldl28', 'field_type':'string'}, {'name':'vtd', 'field_type':'string'}, {'name':'vtdi', 'field_type':'string'}, {'name':'zcta', 'field_type':'string'}, {'name':'sdelm', 'field_type':'string'}, {'name':'sdsec', 'field_type':'string'}, {'name':'sduni', 'field_type':'string'}, {'name':'puma', 'field_type':'string'}, {'name':'arealand', 'field_type':'string'}, {'name':'areawatr', 'field_type':'string'}, {'name':'basename', 'field_type':'string'}, {'name':'name', 'field_type':'string'}, {'name':'funcstat', 'field_type':'string'}, {'name':'gcuni', 'field_type':'string'}, {'name':'pop100', 'field_type':'string'}, {'name':'hu100', 'field_type':'string'}, {'name':'intptlat', 'field_type':'string'}, {'name':'intptlon', 'field_type':'string'}, {'name':'lsadc', 'field_type':'string'}, {'name':'partflag', 'field_type':'string'}, {'name':'uga', 'field_type':'string'})

@@ -32,7 +32,6 @@ class Data(Base):
         self.tbl['countries'] = f'{data_bq}.countries'
 
         for src in self.Sources:
-#             if src != 'proposals':
             self.get(src)
 
 #####################################################################################################
@@ -40,7 +39,6 @@ class Data(Base):
 
     def get_countries(self):
         src = 'countries'
-        
         tbl_raw = self.tbl[src] + '_raw'
         if check_table(tbl_raw):
             rpt(f'using existing raw table')
@@ -106,7 +104,7 @@ order by
                             urllib.request.urlretrieve(url, zp)
                             os.system("unzip -u '*.zip' >/dev/null 2>&1");
                             new += 1
-                if not_found > 30:
+                if not_found > 15:
                     break
         os.chdir(code_path)
         rpt({key:len(val) for key, val in self.proposals_dict.items()})
