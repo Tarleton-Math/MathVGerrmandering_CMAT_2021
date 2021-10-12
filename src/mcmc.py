@@ -13,7 +13,7 @@ class MCMC(Base):
         
     
     def __post_init__(self):
-        self.Sources = ('plan', 'county', 'district', 'summary')
+        self.Sources = ('nodes', 'plan', 'county', 'district', 'summary')
         super().__post_init__()
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
@@ -34,6 +34,34 @@ class MCMC(Base):
         self.update()
         if self.defect_cap == 0:
             self.defect_cap = self.defect
+            
+            
+    def post_process(self):
+        WORKING HERE
+        cols = get_cols(self.tbls['nodes'])
+        a = cols.index('seats')
+        b = cols.index('polygon')
+        self.data_cols = cols[a:b]
+
+        
+        query = list()
+        query.append(f"""
+select
+    A.random_seed,
+    A.plan,
+    A.district,
+    B.county,
+    B.cntyvtd,
+    B.* except (geoid, district)
+from
+    {self.tbls['plan']} as A
+inner join
+    {self.tbls['nodes']} as B
+on
+    A.geoid = B.geoid
+""")
+                     
+        
         
         
     def save_results(self):

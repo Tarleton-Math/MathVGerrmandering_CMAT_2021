@@ -140,7 +140,7 @@ order by
         cols = {'A' : self.District_types.values(),
                 'C' : ['seats_cd', 'seats_sldu', 'seats_sldl', 'total_pop_prop'] + Census_columns['data'],
                 'E' : [c for c in get_cols(self.tbl['elections']) if c not in ['geoid', 'county']],
-                'S' : ['aland']}
+                'S' : []}
         sels = ([f'A.{c} as {c}'              for c in cols['A']] + 
                 [f'coalesce(C.{c}, 0) as {c}' for c in cols['C']] + 
                 [f'coalesce(E.{c}, 0) as {c}' for c in cols['E']] + 
@@ -156,6 +156,7 @@ select
     {join_str().join(sels)},
     st_simplify(S.polygon, 0) as polygon,
     st_simplify(S.polygon, 5) as polygon_simp,
+    S.aland,
 from
     {self.tbl['assignments']} as A
 left join
@@ -495,8 +496,8 @@ order by
         query = f"""
 select
     geoid,
+    st_geogfrom(geometry) as polygon,
     cast(aland as float64) / {m_per_mi**2} as aland,
-    st_geogfrom(geometry) as polygon
 from
     {tbl_raw}
 order by

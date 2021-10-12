@@ -68,7 +68,7 @@ from (
         and st_intersects(x.polygon, y.polygon)
     )
 where
-    shared_perim > 0.05
+    shared_perim > 0.001
 """
         edges = run_query(edges_query)
 
@@ -227,7 +227,7 @@ from (
         src = 'nodes'
         cols = get_cols(self.tbl['source'])
         a = cols.index('total_pop')
-        b = cols.index('aland')
+        b = cols.index('polygon')
         self.data_cols = cols[a:b]
         query = list()
         query.append(f"""
