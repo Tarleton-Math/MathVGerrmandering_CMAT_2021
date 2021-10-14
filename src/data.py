@@ -1,5 +1,3 @@
-
-hi
 from . import *
 import urllib, zipfile as zf, shapely.ops
 try:
