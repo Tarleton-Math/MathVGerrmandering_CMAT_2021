@@ -37,7 +37,7 @@ class MCMC(Base):
             
             
     def post_process(self):
-        WORKING HERE
+        # WORKING HERE
         cols = get_cols(self.tbls['nodes'])
         a = cols.index('seats')
         b = cols.index('polygon')
@@ -67,6 +67,7 @@ on
     def save_results(self):
         self.report()
         print('saving')
+        load_table(tbl=tbl, df=pd.concat(self[src], axis=0), overwrite=self.overwrite_tbl)
         for src, tbl in self.tbls.items():
             saved = False
             for i in range(1, 60):
