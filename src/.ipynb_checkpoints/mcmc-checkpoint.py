@@ -4,16 +4,17 @@ from . import *
 class MCMC(Base):
     gpickle              : str = ''
     random_seed          : int = 0
-    max_steps            : int = 5
-    report_period        : int = 1
-    save_period          : int = 2
+    max_steps            : int = 6
+    report_period        : int = 2
+    save_period          : int = 3
     pop_deviation_target : float = 10.0
     yolo_length          : int = 10
     defect_cap           : int = 0
         
     
     def __post_init__(self):
-        self.Sources = ('nodes', 'plan', 'county', 'district', 'summary')
+        # self.Sources = ('nodes', 'plan', 'county', 'district', 'summary')
+        self.Sources = ('plan', 'county', 'district', 'summary')
         super().__post_init__()
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
@@ -23,6 +24,7 @@ class MCMC(Base):
         w = self.gpickle.stem.split(s)
         stem = f'{root_bq}.{s.join(w[0:3])}.{s.join(w[3:5])}'
         self.tbls = {f'{src}_rec': f'{stem}_{self.random_seed}_{src}' for src in self.Sources}#, 'params']}
+        
         
         self.graph = nx.read_gpickle(self.gpickle)
         self.districts  = sorted({d for x, d in self.graph.nodes(data='district')})
@@ -66,9 +68,9 @@ on
         
     def save_results(self):
         self.report()
-        print('saving')
-        load_table(tbl=tbl, df=pd.concat(self[src], axis=0), overwrite=self.overwrite_tbl)
+        rpt('saving')
         for src, tbl in self.tbls.items():
+            rpt(src)
             saved = False
             for i in range(1, 60):
                 try:
@@ -80,6 +82,7 @@ on
                     time.sleep(1)
             assert saved, f'I tried to write the result of random_seed {self.random_seed} {i} times without success - giving up'
         self.overwrite_tbl = False
+        print(f'done')
 
     
     def run_chain(self):
@@ -91,17 +94,19 @@ on
         while self.plan < self.max_steps:
             self.plan += 1
             msg = f"random_seed {self.random_seed} step {self.plan} pop_deviation={self.pop_deviation:.1f}"
-            if self.recomb():
-                self.record()
-                if self.plan % self.report_period == 0:
-                    self.report()
-                if self.plan % self.save_period == 0:
-                    self.save_results()
-            else:
+            if self.recomb() is False:
                 rpt(msg)
                 break
-        self.save_results()
-        self.report()
+            else:
+                self.record()
+                if self.plan % self.save_period == 0:
+                    self.save_results()
+                elif self.plan % self.report_period == 0:
+                    self.report()
+        if self.plan % self.save_period != 0:
+            self.save_results()
+        elif self.plan % self.report_period != 0:
+            self.report()
         print(f'random_seed {self.random_seed} done')
 
 
