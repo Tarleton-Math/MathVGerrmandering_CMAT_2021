@@ -1,10 +1,10 @@
 from . import *
-proposal_default = 'planh2100'
+# proposal_default = 
 
 @dataclasses.dataclass
 class Space(Base):
-    proposal   : str = proposal_default
-    contract   : str = '0'
+    proposal   : str = 'planh2100'
+    contract   : str = 'proposal'
     node_attr  : typing.Tuple = ()
     edge_attr  : typing.Tuple = ()
 
@@ -119,10 +119,9 @@ where
             
     def get_proposal(self):
         src = 'proposal'
-        if self.proposal != proposal_default:
-            rpt(f'creating proposal table from {self.csv}')
-            df = pd.read_csv(self.csv, skiprows=1, names=('geoid', self.district_type), dtype={'geoid':str})
-            load_table(self.tbls[src], df=df)
+        rpt(f'creating proposal table from {self.csv}')
+        df = pd.read_csv(self.csv, skiprows=1, names=('geoid', self.district_type), dtype={'geoid':str})
+        load_table(self.tbls[src], df=df)
         
         
     def aggegrate(self, qry, show=False):
@@ -239,17 +238,7 @@ from
     {self.tbls['source']}
 """)
         
-        if self.proposal == proposal_default:
-            query.append(f"""
-select
-    A.*,
-    A.{self.district_type} as district,
-from (
-    {subquery(query[-1])}
-    ) as A
-""")
-        else:
-            query.append(f"""
+        query.append(f"""
 select
     A.*,
     B.{self.district_type} as district,
@@ -316,16 +305,7 @@ from (
     {subquery(query[-1])}
     )
 """)
-####### Contract county iff it was wholly contained in a single district in 2010 #######
-            elif self.contract == proposal_default:
-                query.append(f"""
-select
-    *, 
-    case when count(distinct {self.district_type}) over (partition by cnty) = 1 then cnty else {self.level} end as geoid_new,
-from (
-    {subquery(query[-1])}
-    )
-""")
+
 
 ####### Contract county iff it is wholly contained in a single district in the proposed plan #######
             elif self.contract == 'proposal':
@@ -344,7 +324,7 @@ from (
 ####### Why? To avoid decimals in table & file names.  No other reason. #######
             else:
                 try:
-                    c = int(self.contract) / 10
+                    c = float(self.contract) / 10
                 except:
                     raise Exception(f'contract must be "proposal" or "{proposal_default}" or an integer >= 0 ... got {self.contract}')
                 query.append(f"""

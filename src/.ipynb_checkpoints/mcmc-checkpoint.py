@@ -6,7 +6,7 @@ class MCMC(Base):
     nodes                : str = ''
     random_seed          : int = 0
     max_steps            : int = 10
-    report_period        : int = 5
+    report_period        : int = 1
     save_period          : int = 500
     pop_deviation_target : float = np.inf
     yolo_length          : int = 10
@@ -38,18 +38,10 @@ class MCMC(Base):
             
     def post_process(self):
         print(f'post-processing')
-        # node_cols = get_cols(self.nodes)
-        # a = cols.index('seats')
-        # b = cols.index('polygon')
-        # b = None
-        # node_cols = cols[a:b]
-        
-        # node_cols.drop(' = cols[a:b]
         summary_cols  = ['hash'     , 'pop_deviation', 'polsby_popper', 'intersect_defect', 'whole_defect', 'defect']
         district_cols = ['total_pop', 'pop_deviation', 'polsby_popper'                                              , 'aland']
         county_cols   = [                                               'intersect_defect', 'whole_defect', 'defect']
     
-# --{join_str(1).join([f'N.{c}'                 for c in node_cols    ])},    
         query = f"""
 select
     P.random_seed,
