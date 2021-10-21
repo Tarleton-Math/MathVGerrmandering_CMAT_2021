@@ -3,17 +3,17 @@ from . import *
 @dataclasses.dataclass
 class MCMC(Base):
     gpickle              : str = ''
+    nodes                : str = ''
     random_seed          : int = 0
-    max_steps            : int = 6
-    report_period        : int = 2
-    save_period          : int = 3
-    pop_deviation_target : float = 10.0
+    max_steps            : int = 10
+    report_period        : int = 5
+    save_period          : int = 500
+    pop_deviation_target : float = np.inf
     yolo_length          : int = 10
-    defect_cap           : int = 0
+    defect_cap           : int = np.inf
         
     
     def __post_init__(self):
-        # self.Sources = ('nodes', 'plan', 'county', 'district', 'summary')
         self.Sources = ('plan', 'county', 'district', 'summary')
         super().__post_init__()
         self.random_seed = int(self.random_seed)
@@ -22,10 +22,10 @@ class MCMC(Base):
         self.gpickle = pathlib.Path(self.gpickle)
         s = '_'
         w = self.gpickle.stem.split(s)
-        stem = f'{root_bq}.{s.join(w[0:3])}.{s.join(w[3:5])}'
-        self.tbls = {f'{src}_rec': f'{stem}_{self.random_seed}_{src}' for src in self.Sources}#, 'params']}
-        
-        
+        stem = f'{root_bq}.{s.join(w[0:3])}.{s.join(w[3:5])}_{self.random_seed}'
+        self.tbls = {f'{src}_rec': f'{stem}_{src}' for src in self.Sources}
+        self.output = f'{stem}_all'
+
         self.graph = nx.read_gpickle(self.gpickle)
         self.districts  = sorted({d for x, d in self.graph.nodes(data='district')})
         self.counties   = sorted({d for x, d in self.graph.nodes(data='county')})
@@ -34,36 +34,49 @@ class MCMC(Base):
         self.get_adj()
         self.plan = 0
         self.update()
-        if self.defect_cap == 0:
-            self.defect_cap = self.defect
             
             
     def post_process(self):
-        # WORKING HERE
-        cols = get_cols(self.tbls['nodes'])
+        print(f'post-processing')
+        cols = get_cols(self.nodes)
         a = cols.index('seats')
-        b = cols.index('polygon')
-        self.data_cols = cols[a:b]
-
+        # b = cols.index('polygon')
+        b = None
+        node_cols = cols[a:b]
+        summary_cols  = ['hash'     , 'pop_deviation', 'polsby_popper', 'intersect_defect', 'whole_defect', 'defect']
+        district_cols = ['total_pop', 'pop_deviation', 'polsby_popper'                                              , 'aland']
+        county_cols   = [                                               'intersect_defect', 'whole_defect', 'defect']
         
-        query = list()
-        query.append(f"""
+        query = f"""
 select
-    A.random_seed,
-    A.plan,
-    A.district,
-    B.county,
-    B.cntyvtd,
-    B.* except (geoid, district)
+    P.random_seed,
+    P.plan,
+    P.geoid,
+    P.district,
+    {join_str(1).join([f'S.{c} as {c}_plan'     for c in summary_cols ])},
+    {join_str(1).join([f'D.{c} as {c}_district' for c in district_cols])},
+    {join_str(1).join([f'C.{c} as {c}_county'   for c in county_cols  ])},
+    {join_str(1).join([f'N.{c}'                 for c in node_cols    ])},
 from
-    {self.tbls['plan']} as A
-inner join
-    {self.tbls['nodes']} as B
+    {self.tbls['plan_rec']} as P
+left join
+    {self.nodes} as N
 on
-    A.geoid = B.geoid
-""")
-                     
-        
+    N.geoid = P.geoid
+left join
+    {self.tbls['summary_rec']} as S
+on
+    S.random_seed = P.random_seed and S.plan = P.plan
+left join
+    {self.tbls['district_rec']} as D
+on
+    D.random_seed = P.random_seed and D.plan = P.plan and D.district = P.district
+left join
+    {self.tbls['county_rec']} as C
+on
+    C.random_seed = P.random_seed and C.plan = P.plan and C.county = N.county
+"""        
+        load_table(tbl=self.output, query=query)
         
         
     def save_results(self):
@@ -107,6 +120,7 @@ on
             self.save_results()
         elif self.plan % self.report_period != 0:
             self.report()
+        self.post_process()
         print(f'random_seed {self.random_seed} done')
 
 

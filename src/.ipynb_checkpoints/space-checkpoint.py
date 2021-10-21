@@ -17,8 +17,8 @@ class Space(Base):
         self.dataset = f'{root_bq}.{stem}'
         bqclient.create_dataset(self.dataset , exists_ok=True)
         self.path = dict()    
-        self.tbl  = dict()
-        self.tbl['source'] = f'{data_bq}.{self.state.abbr}_{self.census_yr}_source_all'
+        self.tbls  = dict()
+        self.tbls['source'] = f'{data_bq}.{self.state.abbr}_{self.census_yr}_source_all'
 
         for src in self.Sources:
             self.path[src] = data_path / f'proposals/{stem.replace("_", "/")}'
@@ -29,7 +29,7 @@ class Space(Base):
                 s = f'{self.level}_{self.contract}_{src}'
                 if src == 'graph':
                     self.gpickle = self.path[src] / f'{stem}_{s}.gpickle'
-            self.tbl[src] = f'{self.dataset}.{s}'
+            self.tbls[src] = f'{self.dataset}.{s}'
 
         for src in self.Sources:
             self.get(src)
@@ -47,7 +47,7 @@ class Space(Base):
         self.node_attr = {'geoid', 'county', 'district', 'total_pop', 'seats', 'aland', 'perim'}.union(self.node_attr)
         self.edge_attr = {'distance', 'shared_perim'}.union(self.edge_attr)
         # retrieve node data
-        nodes_query = f'select {", ".join(self.node_attr)} from {self.tbl["nodes"]}'
+        nodes_query = f'select {", ".join(self.node_attr)} from {self.tbls["nodes"]}'
         nodes = run_query(nodes_query).set_index('geoid')
 
         # find eges = pairs of nodes that border each other
@@ -61,8 +61,8 @@ from (
         st_distance(x.point, y.point) / {m_per_mi} as distance,
         (x.perim + y.perim - st_perimeter(st_union(x.polygon, y.polygon))/{m_per_mi}) / 2  as shared_perim
     from
-        {self.tbl['nodes']} as x,
-        {self.tbl['nodes']} as y
+        {self.tbls['nodes']} as x,
+        {self.tbls['nodes']} as y
     where
         x.geoid < y.geoid
         and st_intersects(x.polygon, y.polygon)
@@ -122,7 +122,7 @@ where
         if self.proposal != proposal_default:
             rpt(f'creating proposal table from {self.csv}')
             df = pd.read_csv(self.csv, skiprows=1, names=('geoid', self.district_type), dtype={'geoid':str})
-            load_table(self.tbl[src], df=df)
+            load_table(self.tbls[src], df=df)
         
         
     def aggegrate(self, qry, show=False):
@@ -225,7 +225,7 @@ from (
         
     def get_nodes(self, show=False):
         src = 'nodes'
-        cols = get_cols(self.tbl['source'])
+        cols = get_cols(self.tbls['source'])
         a = cols.index('total_pop')
         b = cols.index('polygon')
         self.data_cols = cols[a:b]
@@ -236,7 +236,7 @@ select
     cntyvtd as cntyvtd_temp,
     seats_{self.district_type} as seats,
 from
-    {self.tbl['source']}
+    {self.tbls['source']}
 """)
         
         if self.proposal == proposal_default:
@@ -257,13 +257,13 @@ from (
     {subquery(query[-1])}
     ) as A
 inner join
-    {self.tbl['proposal']} as B
+    {self.tbls['proposal']} as B
 on
     A.geoid = B.geoid
 """)
 
 
-        tbl_data = self.tbl['proposal'] + '_data'
+        tbl_data = self.tbls['proposal'] + '_data'
         if check_table(tbl_data):
             rpt('using existing data table')
         else:
@@ -284,7 +284,7 @@ from (
             query.pop(-1)
 
         
-        tbl_districts = self.tbl['proposal'] + '_districts'
+        tbl_districts = self.tbls['proposal'] + '_districts'
         if check_table(tbl_districts):
             rpt('using existing districts table')
         else:
@@ -301,7 +301,7 @@ from (
             query.pop(-1)
 
 
-        if check_table(self.tbl[src]):
+        if check_table(self.tbls[src]):
             rpt('using nodes table')
         else:
             rpt('creating nodes table')
@@ -355,4 +355,4 @@ from (
     {subquery(query[-1])}
     )
 """)
-            load_table(self.tbl[src], query=self.aggegrate(query)[-1])
+            load_table(self.tbls[src], query=self.aggegrate(query)[-1])

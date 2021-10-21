@@ -98,12 +98,12 @@ class Base():
                     raise Exception(f'got unknown values {d} for {key} ... must be in {vals}')
 
     def delete_for_refresh(self, src):
-        tbl = self.tbl[src]
+        tbl = self.tbls[src]
         if src in self.refresh_all:
             shutil.rmtree(self.path[src], ignore_errors=True)
             for t in bqclient.list_tables(data_bq):
                 nm = t.full_table_id.replace(':', '.')
-                if self.tbl[src] in nm:
+                if self.tbls[src] in nm:
                     rpt(f'deleting {nm}')
                     delete_table(nm)
         if src in self.refresh_tbl:
@@ -115,7 +115,7 @@ class Base():
         rpt(f'Get {src}'.ljust(rpt_just, ' '))
         self.delete_for_refresh(src)
         self.path[src].mkdir(parents=True, exist_ok=True)
-        if check_table(self.tbl[src]):
+        if check_table(self.tbls[src]):
             rpt('using existing table')
         else:
             rpt('processing')

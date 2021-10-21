@@ -19,17 +19,17 @@ class Data(Base):
         if len(self.refresh_tbl) > 0:
             self.refresh_tbl.add('all')
 
-        self.tbl  = dict()
+        self.tbls  = dict()
         self.pq   = dict()
         self.zp   = dict()
         self.path = dict()
         for src in self.Sources:
             stem = f'{self.state.abbr}_{self.census_yr}_source_{src}'
-            self.tbl [src] = f'{data_bq}.{stem}'
+            self.tbls [src] = f'{data_bq}.{stem}'
             self.pq  [src] = data_path / f'{src}/{self.state.abbr}/{stem}.parquet'
             self.zp  [src] = self.pq[src].with_suffix('.zip')
             self.path[src] = self.pq[src].parent
-        self.tbl['countries'] = f'{data_bq}.countries'
+        self.tbls['countries'] = f'{data_bq}.countries'
 
         for src in self.Sources:
             self.get(src)
@@ -39,7 +39,7 @@ class Data(Base):
 
     def get_countries(self):
         src = 'countries'
-        tbl_raw = self.tbl[src] + '_raw'
+        tbl_raw = self.tbls[src] + '_raw'
         if check_table(tbl_raw):
             rpt(f'using existing raw table')
         else:
@@ -71,7 +71,7 @@ from
 order by
     country
 """
-        load_table(self.tbl[src], query=query)
+        load_table(self.tbls[src], query=query)
         delete_table(tbl_raw)
 
 #####################################################################################################
@@ -117,7 +117,7 @@ order by
             df = pd.read_parquet(self.pq[src])
             rpt(f'using existing parquet')
             rpt(f'loading table')
-            load_table(self.tbl[src], df=df)
+            load_table(self.tbls[src], df=df)
             zipfile = False
         except:
             os.chdir(self.path[src])
@@ -139,7 +139,7 @@ order by
         src = 'all'
         cols = {'A' : self.District_types.values(),
                 'C' : ['seats_cd', 'seats_sldu', 'seats_sldl', 'total_pop_prop'] + Census_columns['data'],
-                'E' : [c for c in get_cols(self.tbl['elections']) if c not in ['geoid', 'county']],
+                'E' : [c for c in get_cols(self.tbls['elections']) if c not in ['geoid', 'county']],
                 'S' : []}
         sels = ([f'A.{c} as {c}'              for c in cols['A']] + 
                 [f'coalesce(C.{c}, 0) as {c}' for c in cols['C']] + 
@@ -158,21 +158,21 @@ select
     st_simplify(S.polygon, 5) as polygon_simp,
     S.aland,
 from
-    {self.tbl['assignments']} as A
+    {self.tbls['assignments']} as A
 left join
-    {self.tbl['census']} as C
+    {self.tbls['census']} as C
 on
     A.geoid = C.geoid
 left join
-    {self.tbl['elections']} as E
+    {self.tbls['elections']} as E
 on
     A.geoid = E.geoid
 left join
-    {self.tbl['shapes']} as S
+    {self.tbls['shapes']} as S
 on
     A.geoid = S.geoid
 """
-        load_table(self.tbl[src], query=query, preview_rows=0)
+        load_table(self.tbls[src], query=query, preview_rows=0)
     
 #####################################################################################################
 #####################################################################################################
@@ -184,7 +184,7 @@ on
         if zipfile is False:
             return
         
-        tbl_raw = self.tbl[src] + '_raw'
+        tbl_raw = self.tbls[src] + '_raw'
         if check_table(tbl_raw):
             rpt(f'using existing raw table')
         else:
@@ -223,7 +223,7 @@ on
             c = f'cntyvtd'
             df[c]     = df['fips'].str.rjust(3, '0') + df['vtd']         .str.rjust(6, '0')
             df['alt'] = df['fips'].str.rjust(3, '0') + df['vtd'].str[:-1].str.rjust(6, '0')
-            assign = read_table(self.tbl['assignments'])[c].drop_duplicates()
+            assign = read_table(self.tbls['assignments'])[c].drop_duplicates()
 
             # find cntyvtd in elections not among assignments
             unmatched = ~df[c].isin(assign)
@@ -251,7 +251,7 @@ select
     concat(B.office, '_', B.election_yr, '_', B.party, '_', B.candidate, '_', B.race) as election,
     B.votes * A.cntyvtd_pop_prop as votes,
 from
-    {self.tbl['census']} as A
+    {self.tbls['census']} as A
 inner join
     {tbl_raw} as B
 on
@@ -261,7 +261,7 @@ where
 order by
     geoid
 """
-        tbl_temp = self.tbl[src] + '_temp'
+        tbl_temp = self.tbls[src] + '_temp'
         load_table(tbl_temp, query=query, preview_rows=0)
 
 ######## To bring everything into one table, we must pivot from long to wide format (one row per tabblock) ########
@@ -277,7 +277,7 @@ order by
             b = a + stride
             rpt(f'pivoting columns {a} thru {b}')
             E = elections[a:b]
-            t = f'{self.tbl[src]}_{a}'
+            t = f'{self.tbls[src]}_{a}'
             tbl_chunks.append(t)
             query = f"""
 select
@@ -317,7 +317,7 @@ on
     A.geoid = {alias}.geoid
 """
         query_join += f'order by geoid'
-        load_table(self.tbl[src], query=query_join, preview_rows=0)
+        load_table(self.tbls[src], query=query_join, preview_rows=0)
         delete_table(tbl_temp)
         for t in tbl_chunks:
             delete_table(t)
@@ -337,7 +337,7 @@ on
         if zipfile is False:
             return
 
-        tbl_raw = self.tbl[src] + '_raw'
+        tbl_raw = self.tbls[src] + '_raw'
         if check_table(tbl_raw):
             rpt(f'using existing raw table')
         else:
@@ -417,7 +417,7 @@ select
 from
     {tbl_raw} as D
 inner join
-    {self.tbl['crosswalks']} as E
+    {self.tbls['crosswalks']} as E
 on
     D.geoid = E.geoid_{self.census_yr}
 group by
@@ -441,7 +441,7 @@ from (
         sum(G.total_pop) over (partition by F.cntyvtd) as cntyvtd_pop,
         count(*) over (partition by F.cntyvtd) as cntyvtd_count
     from 
-        {self.tbl['assignments']} as F
+        {self.tbls['assignments']} as F
     inner join(
         {subquery(query, indents=2)}
         ) as G
@@ -451,7 +451,7 @@ from (
 order by
     geoid
 """
-        load_table(self.tbl[src], query=query, preview_rows=0)
+        load_table(self.tbls[src], query=query, preview_rows=0)
 
 #####################################################################################################
 #####################################################################################################
@@ -468,7 +468,7 @@ order by
         if zipfile is False:
             return
         
-        tbl_raw = self.tbl[src] + '_raw'
+        tbl_raw = self.tbls[src] + '_raw'
         if check_table(tbl_raw):
             rpt(f'using existing raw table')
         else:
@@ -503,7 +503,7 @@ from
 order by
     geoid
 """
-        load_table(self.tbl[src], query=query, preview_rows=0)
+        load_table(self.tbls[src], query=query, preview_rows=0)
         delete_table(tbl_raw)
 
 #####################################################################################################
@@ -539,7 +539,7 @@ order by
         df['cnty'] = df['geoid'].str[2:5]
         df = df[['geoid', 'cntyvtd', 'cnty', 'cd', 'sldu', 'sldl']]
         rpt(f'creating table')
-        load_table(self.tbl[src], df=df, preview_rows=0)
+        load_table(self.tbls[src], df=df, preview_rows=0)
 
 #####################################################################################################
 #####################################################################################################
@@ -564,4 +564,4 @@ order by
         df['aland_prop'] = (df['arealand_int'] / df['A']).fillna(0)
         df = df[geoids+['aland_prop']].sort_values(geoids[0])
         rpt(f'creating table')
-        load_table(self.tbl[src], df=df, preview_rows=0)
+        load_table(self.tbls[src], df=df, preview_rows=0)
