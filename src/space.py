@@ -349,7 +349,7 @@ from (
                     raise Exception(f'contract must be "proposal" or "{proposal_default}" or an integer >= 0 ... got {self.contract}')
                 query.append(f"""
 select
-    geoid,
+    *,
     case when sum(seats) over (partition by cnty) < {c} then cnty else {self.level} end as geoid_new,
 from (
     {subquery(query[-1])}
