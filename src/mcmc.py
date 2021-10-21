@@ -38,11 +38,13 @@ class MCMC(Base):
             
     def post_process(self):
         print(f'post-processing')
-        cols = get_cols(self.nodes)
-        a = cols.index('seats')
+        # node_cols = get_cols(self.nodes)
+        # a = cols.index('seats')
         # b = cols.index('polygon')
-        b = None
-        node_cols = cols[a:b]
+        # b = None
+        # node_cols = cols[a:b]
+        
+        # node_cols.drop(' = cols[a:b]
         summary_cols  = ['hash'     , 'pop_deviation', 'polsby_popper', 'intersect_defect', 'whole_defect', 'defect']
         district_cols = ['total_pop', 'pop_deviation', 'polsby_popper'                                              , 'aland']
         county_cols   = [                                               'intersect_defect', 'whole_defect', 'defect']
@@ -56,7 +58,8 @@ select
     {join_str(1).join([f'S.{c} as {c}_plan'     for c in summary_cols ])},
     {join_str(1).join([f'D.{c} as {c}_district' for c in district_cols])},
     {join_str(1).join([f'C.{c} as {c}_county'   for c in county_cols  ])},
-    {join_str(1).join([f'N.{c}'                 for c in node_cols    ])},
+    N.* except (geoid, district),
+    --{join_str(1).join([f'N.{c}'                 for c in node_cols    ])},
 from
     {self.tbls['plan_rec']} as P
 left join
