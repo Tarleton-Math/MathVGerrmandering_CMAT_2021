@@ -96,12 +96,14 @@ order by
                 tag = login_page.soup.select('a')
                 for t in tag:
                     url = t['href']
-                    if url[-8:] == '_blk.zip':
+                    # if url[-8:] == '_blk.zip':
+                    if '.zip' in url:
                         not_found = 0
                         self.proposals_dict[district_type].append(plan)
                         if not zp.is_file():
                             print(f'downloading {plan}')
                             urllib.request.urlretrieve(url, zp)
+                            os.system("unzip -u '*.zip' >/dev/null 2>&1");
                             os.system("unzip -u '*.zip' >/dev/null 2>&1");
                             new += 1
                 if not_found > 15:
@@ -148,6 +150,7 @@ order by
         query = f"""
 select
     A.geoid,
+    substring(A.geoid, 1, 15) as tabblock,
     substring(A.geoid, 1, 12) as bg,
     substring(A.geoid, 1, 11) as tract,
     A.cntyvtd,

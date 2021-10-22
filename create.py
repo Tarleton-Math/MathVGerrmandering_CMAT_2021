@@ -8,7 +8,7 @@ level    = 'cntyvtd'
 proposal = 'planc2122'  # for 2010 enacted, use 'planc2100' for US congress, 'plans2100' for TX Senate, or 'planh2100' for TX House
 contract = 2
 
-# D = Data()
+D = Data()
 S = Space(level=level, proposal=proposal, contract=contract)
 M = MCMC(gpickle=S.gpickle, nodes=S.tbls['nodes'],
          max_steps   = 0,
