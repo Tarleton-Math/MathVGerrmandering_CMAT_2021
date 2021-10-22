@@ -1,10 +1,9 @@
 from . import *
-# proposal_default = 
 
 @dataclasses.dataclass
 class Space(Base):
     proposal   : str = 'planh2100'
-    contract   : str = 'proposal'
+    contract   : str = '0'
     node_attr  : typing.Tuple = ()
     edge_attr  : typing.Tuple = ()
 
@@ -273,21 +272,21 @@ from (
             query.pop(-1)
 
         
-        tbl_districts = self.tbls['proposal'] + '_districts'
-        if check_table(tbl_districts):
-            rpt('using existing districts table')
-        else:
-            rpt('creating districts table')
-            query.append(f"""
-select
-    *,
-    district as geoid_new,
-from (
-    {subquery(query[-1])}
-    )
-""")
-            load_table(tbl_districts, query=self.aggegrate(query)[-1])
-            query.pop(-1)
+#         tbl_districts = self.tbls['proposal'] + '_districts'
+#         if check_table(tbl_districts):
+#             rpt('using existing districts table')
+#         else:
+#             rpt('creating districts table')
+#             query.append(f"""
+# select
+#     *,
+#     district as geoid_new,
+# from (
+#     {subquery(query[-1])}
+#     )
+# """)
+#             load_table(tbl_districts, query=self.aggegrate(query)[-1])
+#             query.pop(-1)
 
 
         if check_table(self.tbls[src]):
@@ -295,20 +294,8 @@ from (
         else:
             rpt('creating nodes table')
 
-####### No county contraction #######
-            if str(self.contract) == '0':
-                query.append(f"""
-select
-    *,
-    {self.level} as geoid_new,
-from (
-    {subquery(query[-1])}
-    )
-""")
-
-
 ####### Contract county iff it is wholly contained in a single district in the proposed plan #######
-            elif self.contract == 'proposal':
+            if self.contract == 'proposal':
                 query.append(f"""
 select
     *, 
