@@ -123,11 +123,6 @@ where
         load_table(self.tbls[src], df=df)
         
         
-        
-        
-        
-        
-        
     def aggegrate(self, qry, show=False):
         data_sums = [f'sum({c}) as {c}' for c in self.data_cols]
 ####### Builds a deeply nested SQL query to generate nodes
@@ -135,15 +130,15 @@ where
 ####### Python builds the SQL query using f-strings.  If you haven't used f-string, they are f-ing amazing.
 ####### Note we keep a dedicated "cntyvtd_temp" even though typically level = cntyvtd
 ####### so that, when we run with level != cntyvtd, we still have access to ctnyvtd via ctnyvtd_temp
-        
-####### Contraction can cause ambiguities.
-####### Suppose some block of a cntyvtd are in county 1 while others are in county 2.
-####### Or some blocks of a contracting county are in district A while others are in district B.
-####### We will assign the contracted node to the county/district/cntyvtd that contains the largest population.
-####### But because we need seats for other purposes AND seats is proportional to total_pop,
-####### it's more convenient to implement this using seats in leiu of total_pop.
-####### We must apply this tie-breaking rule to all categorical variables.
-####### First, find the total seats in each (geoid_new, unit) intersection
+
+# ###### Contraction can cause ambiguities.
+# ###### Suppose some block of a cntyvtd are in county 1 while others are in county 2.
+# ###### Or some blocks of a contracting county are in district A while others are in district B.
+# ###### We will assign the contracted node to the county/district/cntyvtd that contains the largest population.
+# ###### But because we need seats for other purposes AND seats is proportional to total_pop,
+# ###### it's more convenient to implement this using seats in leiu of total_pop.
+# ###### We must apply this tie-breaking rule to all categorical variables.
+# ###### First, find the total seats in each (geoid_new, unit) intersection
 
         query = qry.copy()
         query.append(f"""
@@ -276,7 +271,7 @@ from (
             load_table(tbl_data, query=query[-1])
             query.pop(-1)
 
-        
+
 #         tbl_districts = self.tbls['proposal'] + '_districts'
 #         if check_table(tbl_districts):
 #             rpt('using existing districts table')
