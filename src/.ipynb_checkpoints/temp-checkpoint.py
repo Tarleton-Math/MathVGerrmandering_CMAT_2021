@@ -3,9 +3,11 @@ from . import *
 @dataclasses.dataclass
 class Agg(Base):
     def __post_init__(self):
+        super().__post_init__()
+        self.tbls = dict()
         self.tbls['source'] = f'{data_bq}.{self.state.abbr}_{self.census_yr}_source_all'
 
-    def aggegrate(self, agg_tbl):
+    def aggegrate(self, agg_query, show=False):
         cols = get_cols(self.tbls['source'])
         a = cols.index('total_pop')
         b = cols.index('polygon')
@@ -34,19 +36,21 @@ select
     B.geoid_new
 from 
     {self.tbls['source']} as A
-left join
-    {agg_tbl} as B
+left join(
+    {agg_query}
+    ) as B
 on
     A.geoid = B.geoid
-"""
+""")
     
         geo = ['cntyvtd', 'county', 'cd', 'sldu', 'sldl']
         query.append(f"""
 select
     *,
     {join_str().join([f'sum(total_pop) over (partition by geoid_new, {g}) as pop_{g}' for g in geo])}
-from
-    {self.tbls['source']}
+from (
+    {subquery(query[-1])}
+    )
 """)
 ####### Now, we find the max over all units in a given geoid ###########
         query.append(f"""

@@ -21,15 +21,12 @@ bqclient   = google.cloud.bigquery.Client(credentials=cred, project=proj)
 gcsclient  = google.cloud.storage .Client(credentials=cred, project=proj)
 
 root_path    = pathlib.Path(root_path)
-code_path    = root_path / 'MathVGerrmandering_CMAT_2021'
 data_path    = root_path / 'redistricting_data'
-results_path = root_path / 'redistricting_results'
+code_path    = root_path / 'MathVGerrmandering_CMAT_2021'
 
 root_bq  = proj_id
-data_bq  = root_bq  + '.redistricting_data'
-results_bq  = root_bq  + '.redistricting_results'
-bqclient.create_dataset(data_bq , exists_ok=True)
-# gcs_bucket = gcsclient.get_bucket(gcs_path)
+# data_bq  = root_bq  + '.redistricting_data'
+# bqclient.create_dataset(data_bq, exists_ok=True)
 
 # https://gis.stackexchange.com/questions/27702/what-is-the-srid-of-census-gov-shapefiles
 crs_census = 'EPSG:4269'
@@ -62,13 +59,17 @@ def default_set(x=None):
 
 @dataclasses.dataclass
 class Base():
-    abbr         : str = 'TX'
-    shapes_yr    : int = 2020
-    census_yr    : int = 2020
-    level        : str = 'cntyvtd'
-    seats        : typing.Dict  = default_factory({'cd':38, 'sldu':31, 'sldl':150})
-    refresh_tbl  : typing.Set = default_set()
-    refresh_all  : typing.Set = default_set()
+    abbr          : str = 'TX'
+    shapes_yr     : int = 2020
+    census_yr     : int = 2020
+    level         : str = 'cntyvtd'
+    seats         : typing.Dict  = default_factory({'cd':38, 'sldu':31, 'sldl':150})
+    refresh_tbl   : typing.Set = default_set()
+    refresh_all   : typing.Set = default_set()
+    Sources       : typing.Tuple = ()
+    Years         : typing.Tuple = (2020, 2010)
+    Levels        : typing.Tuple = ('cntyvtd', 'tabblock', 'bg', 'tract', 'cnty')
+    District_types: typing.Dict  = default_factory({'c':'cd', 's':'sldu', 'h':'sldl'})
 
     def __getitem__(self, key):
         return getattr(self, key)
@@ -77,9 +78,9 @@ class Base():
         return setattr(self, key, val)
 
     def __post_init__(self):
-        self.Years          = (2020, 2010)
-        self.Levels         = ('cntyvtd', 'tabblock', 'bg', 'tract', 'cnty')
-        self.District_types = {'c':'cd', 's':'sldu', 'h':'sldl'}
+        self.check_inputs()
+
+    def check_inputs(self):
         self.refresh_all = setify(self.refresh_all)
         self.refresh_tbl = setify(self.refresh_tbl).union(setify(self.refresh_all))
         self.state = states[states['abbr']==self.abbr].iloc[0]
@@ -96,7 +97,7 @@ class Base():
                 d = setify(self[key]).difference(vals)
                 if len(d) > 0:
                     raise Exception(f'got unknown values {d} for {key} ... must be in {vals}')
-
+    
     def delete_for_refresh(self, src):
         tbl = self.tbls[src]
         if src in self.refresh_all:
@@ -114,7 +115,6 @@ class Base():
     def get(self, src):
         rpt(f'Get {src}'.ljust(rpt_just, ' '))
         self.delete_for_refresh(src)
-        self.path[src].mkdir(parents=True, exist_ok=True)
         if check_table(self.tbls[src]):
             rpt('using existing table')
         else:

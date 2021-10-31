@@ -14,26 +14,31 @@ class Data(Base):
         "office like 'USRep%' and race='general'")
         
     def __post_init__(self):
-        self.Sources = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'all', 'countries', 'proposals')
         super().__post_init__()
+        self.Sources = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'countries', 'proposals', 'joined', 'tabblock', 'bg', 'tract', 'cntyvtd', 'cnty', 'all')
+        self.check_inputs()
         if len(self.refresh_tbl) > 0:
-            self.refresh_tbl.add('all')
+            self.refresh_tbl.add('joined')
 
-        self.tbls  = dict()
+        self.tbls = dict()
         self.pq   = dict()
         self.zp   = dict()
         self.path = dict()
+        stem = f'{self.state.abbr}_{self.census_yr}'
+        dataset = f'{root_bq}.redistricting_data'
+        bqclient.create_dataset(dataset, exists_ok=True)
         for src in self.Sources:
-            stem = f'{self.state.abbr}_{self.census_yr}_source_{src}'
-            self.tbls [src] = f'{data_bq}.{stem}'
-            self.pq  [src] = data_path / f'{src}/{self.state.abbr}/{stem}.parquet'
-            self.zp  [src] = self.pq[src].with_suffix('.zip')
-            self.path[src] = self.pq[src].parent
-        self.tbls['countries'] = f'{data_bq}.countries'
+            self.path[src] = data_path / f'{src}/{stem.replace("_", "/")}'
+            self.tbls[src] = f'{dataset}.{stem}_{src}'
+            self.zp  [src] = self.path[src] / f'{stem}_{src}.zip'
+            self.pq  [src] = self.zp[src].with_suffix('.parquet')
+        self.tbls['countries'] = f'{dataset}.countries'
 
         for src in self.Sources:
             self.get(src)
-
+            
+        
+            
 #####################################################################################################
 #####################################################################################################
 
@@ -82,6 +87,7 @@ order by
         self.proposals_dict = {dt:list() for dt in self.District_types.values()}
         browser = mechanicalsoup.Browser()
         for abbr, district_type in self.District_types.items():
+            rpt(f'fetching {district_type}')
             not_found = 0
             new = 0
             for n in range(1000):
@@ -110,9 +116,12 @@ order by
                                 os.chdir(code_path)
                     csv = proposal_path / f'{plan.upper()}.csv'
                     assert csv.is_file(), 'missing expected {str(csv)}'
-                    if not_found > 15:
-                        break
+                if not_found > 15:
+                    break
         rpt({key:len(val) for key, val in self.proposals_dict.items()})
+        df = pd.DataFrame.from_dict(self.proposals_dict, orient='index').stack().to_frame().reset_index()
+        df.columns = ['district_type', 'k', 'name']
+        load_table(self.tbls[src], df=df)
 
 #####################################################################################################
 #####################################################################################################
@@ -125,6 +134,7 @@ order by
             load_table(self.tbls[src], df=df)
             zipfile = False
         except:
+            self.path[src].mkdir(parents=True, exist_ok=True)
             os.chdir(self.path[src])
             try:
                 zipfile = zf.ZipFile(self.zp[src])
@@ -140,8 +150,8 @@ order by
 #####################################################################################################
 #####################################################################################################
     
-    def get_all(self):
-        src = 'all'
+    def get_joined(self):
+        src = 'joined'
         cols = {'A' : self.District_types.values(),
                 'C' : ['seats_cd', 'seats_sldu', 'seats_sldl', 'total_pop_prop'] + Census_columns['data'],
                 'E' : [c for c in get_cols(self.tbls['elections']) if c not in ['geoid', 'county']],
@@ -159,10 +169,11 @@ select
     A.cntyvtd,
     A.cnty,
     max(E.county) over (partition by A.cnty) as county,  --workaround ... county names come from election data, but not all blocks have election data
+    0 as district,
     {join_str().join(sels)},
     st_simplify(S.polygon, 0) as polygon,
     st_simplify(S.polygon, 5) as polygon_simp,
-    S.aland,
+    S.aland
 from
     {self.tbls['assignments']} as A
 left join
@@ -178,9 +189,158 @@ left join
 on
     A.geoid = S.geoid
 """
-        load_table(self.tbls[src], query=query, preview_rows=0)
+        load_table(self.tbls[src], query=query)
+
+        
+    def aggegrate_level(self, level):
+        query = f"""
+select
+    *,
+    {level} as geoid_new
+from
+    {self.tbls['joined']}
+"""
+        load_table(self.tbls[level], query=self.aggegrate(query))
+
+
+    def aggegrate(self, query_in, compute_geo=True, show=False):
+        cols = get_cols(self.tbls['joined'])
+        a = cols.index('total_pop')
+        b = cols.index('polygon')
+        data_cols = cols[a:b]
+        data_sums = [f'sum({c}) as {c}' for c in data_cols]
+####### Builds a nested SQL query to generate nodes
+####### We build the query one level of nesting at a time store the "cumulative query" at each step
+####### Python builds the SQL query using f-strings.  If you haven't used f-string, they are f-ing amazing.
+####### Note we keep a dedicated "cntyvtd_temp" even though typically level = cntyvtd
+####### so that, when we run with level != cntyvtd, we still have access to ctnyvtd via ctnyvtd_temp
+        
+####### Contraction can cause ambiguities.
+####### Suppose some block of a cntyvtd are in county 1 while others are in county 2.
+####### Or some blocks of a contracting county are in district A while others are in district B.
+####### We will assign the contracted node to the county/district/cntyvtd that contains the largest population.
+####### But because we need seats for other purposes AND seats is proportional to total_pop,
+####### it's more convenient to implement this using seats in leiu of total_pop.
+####### We must apply this tie-breaking rule to all categorical variables.
+####### First, find the total seats in each (geoid_new, unit) intersection
+        
+        geo_cols = ['cntyvtd', 'county', 'cd', 'sldu', 'sldl', 'district']
+        query = [query_in]
+        query.append(f"""
+select
+    *,
+    {join_str().join([f'sum(total_pop) over (partition by geoid_new, {g}) as pop_{g}' for g in geo_cols])}
+from (
+    {subquery(query[-1])}
+    )
+""")
+####### Now, we find the max over all units in a given geoid ###########
+        query.append(f"""
+select
+    *,
+    {join_str().join([f'max(pop_{g}) over (partition by geoid_new) pop_{g}_max' for g in geo_cols])},
+from (
+    {subquery(query[-1])}
+    )
+""")
+####### Now, we create temporary columns that are null except on the rows of the unit achieving the max value found above
+####### When we do the "big aggegration" below, max() will grab the name of the correct unit (one with max seat)
+        query.append(f"""
+select
+    *,
+    {join_str().join([f'case when pop_{g} = pop_{g}_max then {g} else null end as {g}_new' for g in geo_cols])},
+from (
+    {subquery(query[-1])}
+    )
+""")
+####### Time for the big aggregration step.
+####### Join source, groupby geoid_new, and aggregate categorical variable with max, numerical variables with sum,
+####### and geospatial polygon with st_union_agg.
+        if compute_geo:
+            query.append(f"""
+select
+    geoid_new as geoid,
+    {join_str().join([f'max({g}_new) as {g}' for g in geo_cols])},
+    sum(seats_cd) as seats_cd,
+    sum(seats_sldu) as seats_sldu,
+    sum(seats_sldl) as seats_sldl,
+    {join_str().join(data_sums)},
+    st_union_agg(polygon_simp) as polygon,
+    sum(aland) as aland,
+from (
+    {subquery(query[-1])}
+    )
+group by
+    geoid_new
+""")
+####### Get polygon perimeter #######
+            query.append(f"""
+select
+    *,
+    st_perimeter(polygon) / {m_per_mi} as perim,
+from (
+    {subquery(query[-1])}
+    )
+""")
+####### Compute density, polsby-popper, and centroid #######
+            query.append(f"""
+select
+    *,
+    case when perim > 0 then round(4 * {np.pi} * aland / (perim * perim) * 100, 2) else 0 end as polsby_popper,
+    case when aland > 0 then total_pop / aland else 0 end as density,
+    st_centroid(polygon) as point,
+from (
+    {subquery(query[-1])}
+    )
+""")
+        
+        
+        else:
+            query.append(f"""
+select
+    geoid_new as geoid,
+    {join_str().join([f'max({g}_new) as {g}' for g in geo_cols])},
+from (
+    {subquery(query[-1])}
+    )
+group by
+    geoid_new
+""")
+
+            query.append(f"""
+select
+    A.*,
+    B.* except (geoid, {', '.join(geo_cols)})
+from (
+    {subquery(query[-1])}
+    ) as A
+inner join
+    {self.tbls['all']} as B
+on
+    A.geoid = B.geoid
+""")
+
+        if show:
+            for k, q in enumerate(query):
+                print(f'\n=====================================================================================\nstage {k}')
+                print(q)
+        return query[-1]
             
     
+    def get_tabblock(self):
+        self.aggegrate_level('tabblock')
+    def get_bg(self):
+        self.aggegrate_level('bg')
+    def get_tract(self):
+        self.aggegrate_level('tract')
+    def get_cntyvtd(self):
+        self.aggegrate_level('cntyvtd')
+    def get_cnty(self):
+        self.aggegrate_level('cnty')
+    def get_all(self):
+        query = '\nunion all\n'.join([f'select * from {self.tbls[level]}' for level in self.Levels])
+        load_table(self.tbls['all'], query=query)
+
 #####################################################################################################
 #####################################################################################################
 
