@@ -1,5 +1,4 @@
-from . import *
-from .data import Data
+from .data import *
 
 @dataclasses.dataclass
 class Space(Data):
@@ -11,23 +10,24 @@ class Space(Data):
         
     def __post_init__(self):
         super().__post_init__()
-        self.Sources = ('proposal', 'nodes')#, 'graph')
+        self.sources = ('proposal', 'nodes', 'districts', 'graph')
         self.check_inputs()
         self.district_type = self.District_types[self.proposal[4]]
+        self.disconnected_districts = set()
         
         stem = f'{self.state.abbr}_{self.census_yr}_{self.district_type}_{self.proposal}'
         dataset = f'{root_bq}.{stem}'
         bqclient.create_dataset(dataset, exists_ok=True)
-        for src in self.Sources:
-            self.path[src] = data_path / f'proposals/{stem.replace("_", "/")}'
-            if src == 'proposal':
+        for src in self.sources:
+            self.path[src] = data_path / f'proposals/{stem.replace("_", "/")}/{src}'
+            if src in ['proposal', 'districts']:
                 self.tbls[src] = f'{dataset}.{src}'
-                self.csv = self.path[src] / f'{self.proposal.upper()}.csv'
             else:
                 self.tbls[src] = f'{dataset}.{self.level}_{self.contract}_{src}'
-                self.gpickle = self.path[src] / f'{self.level}_{self.contract}_graph.gpickle'
+        self.csv     = self.path['proposal'] / f'{self.proposal.upper()}.csv'
+        self.gpickle = self.path['graph']    / f'{self.level}_{self.contract}_graph.gpickle'
 
-        for src in self.Sources:
+        for src in self.sources:
             self.get(src)
 
 
@@ -39,8 +39,9 @@ class Space(Data):
             return
         except:
             rpt(f'creating graph')
+        self.gpickle.parent.mkdir(parents=True, exist_ok=True)
         # what attributes will be stored in nodes & edges
-        self.node_attr = {'geoid', 'county', 'district', 'total_pop', 'seats', 'aland', 'perim'}.union(self.node_attr)
+        self.node_attr = {'geoid', 'county', 'district', 'total_pop', f'seats_{self.district_type} as seats', 'aland', 'perim'}.union(self.node_attr)
         self.edge_attr = {'distance', 'shared_perim'}.union(self.edge_attr)
         # retrieve node data
         nodes_query = f'select {", ".join(self.node_attr)} from {self.tbls["nodes"]}'
@@ -55,7 +56,7 @@ from (
         x.geoid as geoid_x,
         y.geoid as geoid_y,        
         st_distance(x.point, y.point) / {m_per_mi} as distance,
-        (x.perim + y.perim - st_perimeter(st_union(x.polygon, y.polygon))/{m_per_mi}) / 2  as shared_perim
+        (x.perim + y.perim - st_perimeter(st_union(x.polygon, y.polygon)) / 2 /{m_per_mi})  as shared_perim
     from
         {self.tbls['nodes']} as x,
         {self.tbls['nodes']} as y
@@ -63,8 +64,8 @@ from (
         x.geoid < y.geoid
         and st_intersects(x.polygon, y.polygon)
     )
-where
-    shared_perim > 0.001
+--where
+--    shared_perim > 0.001
 """
         edges = run_query(edges_query)
 
@@ -86,13 +87,15 @@ where
                     # May create population deviation which will be corrected during MCMC.
                     print(f'regrouping to connect components of district {D} with component {[len(c) for c in comp]}')
                     connected = False
+                    self.disconnected_districts.add(D)
+                    
                     for c in comp[1:]:
                         for x in c:
                             y = rng.choice(list(self.graph.neighbors(x)))  # chose a random neighbor
                             self.graph.nodes[x]['district'] = self.graph.nodes[y]['district']  # adopt its district
 
         # Create new districts starting at nodes with high population
-        new_districts = self.seats[self.district_type] - len(districts)
+        new_districts = self.Seats[self.district_type] - len(districts)
         if new_districts > 0:
             new_district_starts = nodes.nlargest(10 * new_districts, 'total_pop').index.tolist()
             D_new = max(districts) + 1
@@ -115,26 +118,46 @@ where
             
     def get_proposal(self):
         src = 'proposal'
-        rpt(f'creating proposal table from {self.csv}')
-        df = pd.read_csv(self.csv, skiprows=1, names=('geoid', self.district_type), dtype={'geoid':str})
-        load_table(self.tbls[src], df=df)
+        # rpt(f'creating proposal table from {self.csv}')
+        self.proposal_df = pd.read_csv(self.csv, skiprows=1, names=('geoid', self.district_type), dtype={'geoid':str})
+        load_table(self.tbls[src], df=self.proposal_df)
         
         
-    def get_nodes(self, show=False):
-        src = 'nodes'
+    def join_proposal(self):
         query = list()
         query.append(f"""
 select
     A.* except (district),
     B.{self.district_type} as district,
 from
-    {self.tbls['tabblock']} as A
+    {self.tbls['joined']} as A
 inner join
     {self.tbls['proposal']} as B
 on
     A.geoid = B.geoid
 """)
-        
+        return query
+    
+    
+    def get_districts(self, show=False):
+        src = 'districts'
+        query = self.join_proposal()
+        query.append(f"""
+select
+    *,
+    district as geoid_new,
+from (
+    {subquery(query[-1])}
+    )
+""")
+        load_table(self.tbls[src], query=self.aggegrate(query[-1], geo='skip', show=show))
+        # load_table(self.tbls[src], query=self.aggegrate(query[-1], geo='compute', show=show))
+    
+    
+    def get_nodes(self, show=False):
+        src = 'nodes'
+        query = self.join_proposal()
+
 # ####### Contract county iff it is wholly contained in a single district in the proposed plan #######
         if self.contract == 'proposal':
             query.append(f"""
@@ -158,12 +181,12 @@ from (
             query.append(f"""
 select
     *,
-    case when sum(seats_{self.district_type}) over (partition by county) < {c} then county else {self.level} end as geoid_new,
+    case when sum(seats_{self.district_type}) over (partition by county) < {c} then cnty else {self.level} end as geoid_new,
 from (
     {subquery(query[-1])}
     )
 """)
-            load_table(self.tbls[src], query=self.aggegrate(query[-1], compute_geo=False))
+            load_table(self.tbls[src], query=self.aggegrate(query[-1], geo='join', show=show))
         
         
         

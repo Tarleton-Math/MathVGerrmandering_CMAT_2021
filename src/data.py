@@ -15,10 +15,8 @@ class Data(Base):
         
     def __post_init__(self):
         super().__post_init__()
-        self.Sources = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'countries', 'proposals', 'joined', 'tabblock', 'bg', 'tract', 'cntyvtd', 'cnty', 'all')
+        self.sources = ('crosswalks', 'assignments', 'shapes', 'census', 'elections', 'countries', 'proposals', 'joined', 'tabblock', 'bg', 'tract', 'cntyvtd', 'cnty', 'all')
         self.check_inputs()
-        if len(self.refresh_tbl) > 0:
-            self.refresh_tbl.add('joined')
 
         self.tbls = dict()
         self.pq   = dict()
@@ -27,17 +25,15 @@ class Data(Base):
         stem = f'{self.state.abbr}_{self.census_yr}'
         dataset = f'{root_bq}.redistricting_data'
         bqclient.create_dataset(dataset, exists_ok=True)
-        for src in self.Sources:
+        for src in self.sources:
             self.path[src] = data_path / f'{src}/{stem.replace("_", "/")}'
             self.tbls[src] = f'{dataset}.{stem}_{src}'
             self.zp  [src] = self.path[src] / f'{stem}_{src}.zip'
             self.pq  [src] = self.zp[src].with_suffix('.parquet')
         self.tbls['countries'] = f'{dataset}.countries'
 
-        for src in self.Sources:
+        for src in self.sources:
             self.get(src)
-            
-        
             
 #####################################################################################################
 #####################################################################################################
@@ -84,22 +80,23 @@ order by
 
     def get_proposals(self):
         src = 'proposals'
-        self.proposals_dict = {dt:list() for dt in self.District_types.values()}
+        self.proposals = list()
+        
+        # self.proposals_dict = {dt:list() for dt in self.District_types.values()}
         browser = mechanicalsoup.Browser()
         for abbr, district_type in self.District_types.items():
             rpt(f'fetching {district_type}')
             not_found = 0
             new = 0
-            for n in range(1000):
+            for k in range(1000):
                 not_found += 1
-                plan = f'plan{abbr}{2100+n}'.lower()
-                root_url = f'https://data.capitol.texas.gov/dataset/{plan}#'
+                proposal = f'plan{abbr}{2100+k}'.lower()
+                root_url = f'https://data.capitol.texas.gov/dataset/{proposal}#'
                 login_page = browser.get(root_url)
                 tag = login_page.soup.select('a')
                 if len(tag) >= 10:
                     not_found = 0
-                    self.proposals_dict[district_type].append(plan)
-                    proposal_path = self.path[src] / f'{district_type}/{plan}'
+                    proposal_path = self.path[src] / f'{district_type}/{proposal}/proposal'
                     proposal_path.mkdir(parents=True, exist_ok=True)
                     for t in tag:
                         url = t['href']
@@ -107,21 +104,24 @@ order by
                             fn = url.split('/')[-1]
                             zp = proposal_path / fn
                             if not zp.is_file():
-                                print(f'downloading {plan}')
+                                print(f'downloading {proposal}')
                                 os.chdir(proposal_path)
                                 urllib.request.urlretrieve(url, zp)
                                 os.system("unzip -u '*.zip' >/dev/null 2>&1");
                                 os.system("unzip -u '*.zip' >/dev/null 2>&1");
                                 new += 1
                                 os.chdir(code_path)
-                    csv = proposal_path / f'{plan.upper()}.csv'
-                    assert csv.is_file(), 'missing expected {str(csv)}'
+                    csv = proposal_path / f'{proposal.upper()}.csv'
+                    df = pd.read_csv(csv, skiprows=1, names=('geoid', district_type), dtype={'geoid':str})
+                    seats = df[district_type].nunique()
+                    complete = (seats == self.Seats[district_type]) or (k == 0)
+                    print(proposal, seats, complete)
+                    self.proposals.append({'district_type':district_type, 'proposal':proposal, 'k':k, 'complete':complete, 'csv':str(csv)})
                 if not_found > 15:
                     break
-        rpt({key:len(val) for key, val in self.proposals_dict.items()})
-        df = pd.DataFrame.from_dict(self.proposals_dict, orient='index').stack().to_frame().reset_index()
-        df.columns = ['district_type', 'k', 'name']
-        load_table(self.tbls[src], df=df)
+        # rpt({key:len(val) for key, val in self.proposals_dict.items()})
+        self.proposals = pd.DataFrame(self.proposals)
+        load_table(self.tbls[src], df=self.proposals)
 
 #####################################################################################################
 #####################################################################################################
@@ -151,6 +151,7 @@ order by
 #####################################################################################################
     
     def get_joined(self):
+        self.refresh_tbl.update(self.Levels)
         src = 'joined'
         cols = {'A' : self.District_types.values(),
                 'C' : ['seats_cd', 'seats_sldu', 'seats_sldl', 'total_pop_prop'] + Census_columns['data'],
@@ -192,18 +193,15 @@ on
         load_table(self.tbls[src], query=query)
 
         
-    def aggegrate_level(self, level):
-        query = f"""
-select
-    *,
-    {level} as geoid_new
-from
-    {self.tbls['joined']}
-"""
-        load_table(self.tbls[level], query=self.aggegrate(query))
-
-
-    def aggegrate(self, query_in, compute_geo=True, show=False):
+    def aggegrate(self, query_in, geo='compute', show=False):
+        geo = geo.lower()
+        if geo == 'compute':
+            rpt(f'computing geo')
+        elif geo == 'join':
+            rpt(f'attempting to join existing geo')
+        else:
+            rpt('skipping geo')
+        geo_cols = ['cntyvtd', 'county', 'cd', 'sldu', 'sldl', 'district']
         cols = get_cols(self.tbls['joined'])
         a = cols.index('total_pop')
         b = cols.index('polygon')
@@ -223,17 +221,18 @@ from
 ####### it's more convenient to implement this using seats in leiu of total_pop.
 ####### We must apply this tie-breaking rule to all categorical variables.
 ####### First, find the total seats in each (geoid_new, unit) intersection
-        
-        geo_cols = ['cntyvtd', 'county', 'cd', 'sldu', 'sldl', 'district']
         query = [query_in]
         query.append(f"""
 select
-    *,
+    geoid,
+    geoid_new,
+    {join_str().join(geo_cols)},
     {join_str().join([f'sum(total_pop) over (partition by geoid_new, {g}) as pop_{g}' for g in geo_cols])}
 from (
     {subquery(query[-1])}
     )
 """)
+        
 ####### Now, we find the max over all units in a given geoid ###########
         query.append(f"""
 select
@@ -253,10 +252,23 @@ from (
     {subquery(query[-1])}
     )
 """)
+
 ####### Time for the big aggregration step.
 ####### Join source, groupby geoid_new, and aggregate categorical variable with max, numerical variables with sum,
 ####### and geospatial polygon with st_union_agg.
-        if compute_geo:
+        if geo == 'compute':
+            query.append(f"""
+select
+    A.*,
+    B.* except (geoid, polygon),
+from (
+    {subquery(query[-1])}
+    ) as A
+left join
+    {self.tbls['joined']} as B
+on
+    A.geoid = B.geoid
+""")
             query.append(f"""
 select
     geoid_new as geoid,
@@ -294,27 +306,48 @@ from (
     )
 """)
         
-        
         else:
+            query.append(f"""
+select
+    A.*,
+    B.* except (geoid, polygon, aland)
+from (
+    {subquery(query[-1])}
+    ) as A
+left join
+    {self.tbls['all']} as B
+on
+    A.geoid = B.geoid
+""")
+            
             query.append(f"""
 select
     geoid_new as geoid,
     {join_str().join([f'max({g}_new) as {g}' for g in geo_cols])},
+    sum(seats_cd) as seats_cd,
+    sum(seats_sldu) as seats_sldu,
+    sum(seats_sldl) as seats_sldl,
+    {join_str().join(data_sums)},
 from (
     {subquery(query[-1])}
     )
 group by
     geoid_new
 """)
-
-            query.append(f"""
+            if geo == 'join':
+                query.append(f"""
 select
     A.*,
-    B.* except (geoid, {', '.join(geo_cols)})
+    B.polygon,
+    B.aland,
+    B.perim,
+    B.polsby_popper,
+    B.density,
+    B.point
 from (
     {subquery(query[-1])}
     ) as A
-inner join
+left join
     {self.tbls['all']} as B
 on
     A.geoid = B.geoid
@@ -327,16 +360,28 @@ on
         return query[-1]
             
     
-    def get_tabblock(self):
-        self.aggegrate_level('tabblock')
-    def get_bg(self):
-        self.aggegrate_level('bg')
-    def get_tract(self):
-        self.aggegrate_level('tract')
-    def get_cntyvtd(self):
-        self.aggegrate_level('cntyvtd')
-    def get_cnty(self):
-        self.aggegrate_level('cnty')
+    def aggegrate_level(self, level, show=False):
+        self.refresh_tbl.add('all')
+        query = f"""
+select
+    *,
+    {level} as geoid_new
+from
+    {self.tbls['joined']}
+"""
+        load_table(self.tbls[level], query=self.aggegrate(query, geo='compute', show=show))
+
+    
+    def get_tabblock(self, show=False):
+        self.aggegrate_level('tabblock', show=show)
+    def get_bg(self, show=False):
+        self.aggegrate_level('bg', show=show)
+    def get_tract(self, show=False):
+        self.aggegrate_level('tract', show=show)
+    def get_cntyvtd(self, show=False):
+        self.aggegrate_level('cntyvtd', show=show)
+    def get_cnty(self, show=False):
+        self.aggegrate_level('cnty', show=show)
     def get_all(self):
         query = '\nunion all\n'.join([f'select * from {self.tbls[level]}' for level in self.Levels])
         load_table(self.tbls['all'], query=query)
@@ -345,6 +390,7 @@ on
 #####################################################################################################
 
     def get_elections(self):
+        self.refresh_tbl.add('joined')
         src = 'elections'
         url = f'https://data.capitol.texas.gov/dataset/aab5e1e5-d585-4542-9ae8-1108f45fce5b/resource/253f5191-73f3-493a-9be3-9e8ba65053a2/download/{self.census_yr}-general-vtd-election-data.zip'
         zipfile = self.fetch(src, url)
@@ -356,7 +402,6 @@ on
             rpt(f'using existing raw table')
         else:
             rpt(f'creating raw table')
-
             ext = '_Returns.csv'
             k = len(ext)
             L = []
@@ -498,6 +543,7 @@ on
 #         os.system(cmd)
 
     def get_census(self):
+        self.refresh_tbl.add('joined')
         src = 'census'
         url = f'https://www2.census.gov/programs-surveys/decennial/{self.census_yr}/data/01-Redistricting_File--PL_94-171/{self.state.name.replace(" ", "_")}/{self.state.abbr.lower()}{self.census_yr}.pl.zip'
         zipfile = self.fetch(src, url)
@@ -597,9 +643,9 @@ group by
 select
     *,
     case when cntyvtd_pop > 0 then total_pop / cntyvtd_pop else 1 / cntyvtd_count end as cntyvtd_pop_prop,
-    total_pop_prop * {self.seats['cd']} as seats_cd,
-    total_pop_prop * {self.seats['sldu']} as seats_sldu,
-    total_pop_prop * {self.seats['sldl']} as seats_sldl
+    total_pop_prop * {self.Seats['cd']} as seats_cd,
+    total_pop_prop * {self.Seats['sldu']} as seats_sldu,
+    total_pop_prop * {self.Seats['sldl']} as seats_sldl
 from (
     select
         G.*,
@@ -624,6 +670,7 @@ order by
 #####################################################################################################
     
     def get_shapes(self):
+        self.refresh_tbl.add('joined')
         src = 'shapes'
         url = f'https://www2.census.gov/geo/tiger/TIGER{self.shapes_yr}/TABBLOCK'
         if self.shapes_yr == 2010:
@@ -677,6 +724,7 @@ order by
 #####################################################################################################
     
     def get_assignments(self):
+        self.refresh_tbl.add('joined')
         src = 'assignments'
         url = f'https://www2.census.gov/geo/docs/maps-data/data/baf'
         if self.census_yr == 2020:
@@ -712,6 +760,7 @@ order by
 #####################################################################################################
     
     def get_crosswalks(self):
+        self.refresh_tbl.add('joined')
         src = 'crosswalks'
         url = f'https://www2.census.gov/geo/docs/maps-data/data/rel2020/t10t20/TAB2010_TAB2020_ST{self.state.fips}.zip'
         zipfile = self.fetch(src, url)

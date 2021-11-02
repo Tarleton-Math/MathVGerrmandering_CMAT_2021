@@ -21,12 +21,10 @@ bqclient   = google.cloud.bigquery.Client(credentials=cred, project=proj)
 gcsclient  = google.cloud.storage .Client(credentials=cred, project=proj)
 
 root_path    = pathlib.Path(root_path)
+root_bq      = proj_id
+data_bq      = root_bq   +'.redistricting_data'
 data_path    = root_path / 'redistricting_data'
 code_path    = root_path / 'MathVGerrmandering_CMAT_2021'
-
-root_bq  = proj_id
-# data_bq  = root_bq  + '.redistricting_data'
-# bqclient.create_dataset(data_bq, exists_ok=True)
 
 # https://gis.stackexchange.com/questions/27702/what-is-the-srid-of-census-gov-shapefiles
 crs_census = 'EPSG:4269'
@@ -63,12 +61,12 @@ class Base():
     shapes_yr     : int = 2020
     census_yr     : int = 2020
     level         : str = 'cntyvtd'
-    seats         : typing.Dict  = default_factory({'cd':38, 'sldu':31, 'sldl':150})
+    Seats         : typing.Dict  = default_factory({'cd':38, 'sldu':31, 'sldl':150})
     refresh_tbl   : typing.Set = default_set()
     refresh_all   : typing.Set = default_set()
-    Sources       : typing.Tuple = ()
+    sources       : typing.Tuple = ()
     Years         : typing.Tuple = (2020, 2010)
-    Levels        : typing.Tuple = ('cntyvtd', 'tabblock', 'bg', 'tract', 'cnty')
+    Levels        : typing.Tuple = ('tabblock', 'bg', 'tract', 'cntyvtd', 'cnty')
     District_types: typing.Dict  = default_factory({'c':'cd', 's':'sldu', 'h':'sldl'})
 
     def __getitem__(self, key):
@@ -78,19 +76,18 @@ class Base():
         return setattr(self, key, val)
 
     def __post_init__(self):
-        self.check_inputs()
+        pass
 
     def check_inputs(self):
         self.refresh_all = setify(self.refresh_all)
         self.refresh_tbl = setify(self.refresh_tbl).union(setify(self.refresh_all))
         self.state = states[states['abbr']==self.abbr].iloc[0]
-
         D = {'census_yr'    :self.Years,
              'shapes_yr'    :self.Years,
              'level'        :self.Levels,
              'district_type':tuple(self.District_types.values()),
-             'refresh_all'  :self.Sources,
-             'refresh_tbl'  :self.Sources,
+             # 'refresh_all'  :self.sources,
+             # 'refresh_tbl'  :self.sources,
             }
         for key, vals in D.items():
             if hasattr(self, key):
@@ -102,10 +99,10 @@ class Base():
         tbl = self.tbls[src]
         if src in self.refresh_all:
             shutil.rmtree(self.path[src], ignore_errors=True)
-            for t in bqclient.list_tables(data_bq):
+            dataset = tbl[:tbl.rfind('.')]
+            for t in bqclient.list_tables(dataset):
                 nm = t.full_table_id.replace(':', '.')
-                if self.tbls[src] in nm:
-                    rpt(f'deleting {nm}')
+                if tbl in nm:
                     delete_table(nm)
         if src in self.refresh_tbl:
             if check_table(tbl):
@@ -227,7 +224,7 @@ def graph_to_df(G, index_name='geoid', index_position=2, attr=None):
 
 def sorter(L, sort=True):
     if sort:
-        L = tuple(sorted((tuple(sorted(x)) for x in L), key=lambda x: (len(x), x)))
+        L = tuple(sorted((tuple(sorted(x)) for x in L), key=lambda x: (len(x), x), reverse=True))
     return L
 
 def get_edges(G, sort=True):

@@ -1,9 +1,7 @@
-from . import *
+from .space import *
 
 @dataclasses.dataclass
-class MCMC(Base):
-    gpickle              : str = ''
-    nodes                : str = ''
+class MCMC(Space):
     random_seed          : int = 0
     max_steps            : int = 10
     report_period        : int = 1
@@ -14,19 +12,23 @@ class MCMC(Base):
         
     
     def __post_init__(self):
-        self.Sources = ('plan', 'county', 'district', 'summary')
         super().__post_init__()
+        self.sources = ('plan', 'county', 'district', 'summary', 'hash')
+        self.check_inputs()
+        
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
 
-        self.gpickle = pathlib.Path(self.gpickle)
-        s = '_'
-        w = self.gpickle.stem.split(s)
-        stem = f'{root_bq}.{s.join(w[0:3])}.{s.join(w[3:5])}_{self.random_seed}'
-        self.tbls = {f'{src}_rec': f'{stem}_{src}' for src in self.Sources}
-        self.output = f'{stem}_all'
-
-        self.graph = nx.read_gpickle(self.gpickle)
+        stem = f'{self.state.abbr}_{self.census_yr}_{self.district_type}_{self.proposal}'
+        dataset = f'{root_bq}.{stem}'
+        bqclient.create_dataset(dataset, exists_ok=True)
+        self.recs = dict()
+        for src in self.sources:
+            self.recs[src] = list()
+            self.path[src] = data_path / f'proposals/{stem.replace("_", "/")}'
+            self.tbls[src] = f'{dataset}.{self.level}_{self.contract}_{self.random_seed}_{src}'
+        self.output = f'{dataset}.{self.level}_{self.contract}_{self.random_seed}_all'
+            
         self.districts  = sorted({d for x, d in self.graph.nodes(data='district')})
         self.counties   = sorted({d for x, d in self.graph.nodes(data='county')})
         self.total_pop  = sum(d for x, d in self.graph.nodes(data='total_pop'))
@@ -54,21 +56,21 @@ select
     {join_str(1).join([f'C.{c} as {c}_county'   for c in county_cols  ])},
     --N.* except (geoid, district, county),
 from
-    {self.tbls['plan_rec']} as P
+    {self.tbls['plan']} as P
 left join
-    {self.nodes} as N
+    {self.tbls['nodes']} as N
 on
     N.geoid = P.geoid
 left join
-    {self.tbls['summary_rec']} as S
+    {self.tbls['summary']} as S
 on
     S.random_seed = P.random_seed and S.plan = P.plan
 left join
-    {self.tbls['district_rec']} as D
+    {self.tbls['district']} as D
 on
     D.random_seed = P.random_seed and D.plan = P.plan and D.district = P.district
 left join
-    {self.tbls['county_rec']} as C
+    {self.tbls['county']} as C
 on
     C.random_seed = P.random_seed and C.plan = P.plan and C.county = N.county
 """        
@@ -78,17 +80,19 @@ on
     def save_results(self):
         self.report()
         rpt('saving')
-        for src, tbl in self.tbls.items():
+        for src in self.recs.keys():
+            if src == 'hash':
+                continue
             rpt(src)
             saved = False
             for i in range(1, 60):
                 try:
-                    load_table(tbl=tbl, df=pd.concat(self[src], axis=0), overwrite=self.overwrite_tbl)
-                    self[src] = list()
+                    load_table(tbl=self.tbls[src], df=pd.concat(self.recs[src], axis=0), overwrite=self.overwrite_tbl)
+                    self.recs[src] = list()
                     saved = True
                     break
                 except:
-                    time.sleep(1)
+                    time.sleep(5)
             assert saved, f'I tried to write the result of random_seed {self.random_seed} {i} times without success - giving up'
         self.overwrite_tbl = False
         print(f'done')
@@ -100,6 +104,7 @@ on
         self.overwrite_tbl = True
         self.record()
         self.start_time = time.time()
+        self.save_results()
         while self.plan < self.max_steps:
             self.plan += 1
             msg = f"random_seed {self.random_seed} step {self.plan} pop_deviation={self.pop_deviation:.1f}"
@@ -138,16 +143,12 @@ on
     
     def record(self):
         self.update()
-        for a in ['plan', 'county', 'district', 'summary', 'hash']:
-            r = f'{a}_rec'
-            if a == 'hash':
+        for src, rec in self.recs.items():
+            if src == 'hash':
                 X = self.hash
             else:
-                X = self[f'{a}_df'].copy()
-            try:
-                self[r].append(X)
-            except:
-                self[r] = [X]
+                X = self[f'{src}_df'].copy()
+            rec.append(X)
 
 
     def report(self):
@@ -255,7 +256,7 @@ on
                         accept()
                          # if we've seen that plan recently, reject and try again
                         h = get_hash(self.graph)
-                        if h in self.hash_rec[-self.yolo_length:]:
+                        if h in self.recs['hash'][-self.yolo_length:]:
                             reject()
                             continue
 
@@ -265,6 +266,7 @@ on
                         if self.defect > self.defect_cap and self.defect > old_defect:
                             reject()
                             self.get_county_stats()
+                            self.defect = old_defect
                             continue
 
                         self.update()
@@ -358,6 +360,7 @@ on
         
     def get_adj(self):
         src = 'adj'
+        rpt
         # Create the county-district bi-partite adjacency graph.
         # This graph has 1 node for each county and district &
         # an edge for all (county, district) that intersect (share land).
