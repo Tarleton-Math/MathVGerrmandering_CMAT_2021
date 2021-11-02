@@ -186,7 +186,7 @@ from (
     {subquery(query[-1])}
     )
 """)
-            load_table(self.tbls[src], query=self.aggegrate(query[-1], geo='join', show=show))
+        load_table(self.tbls[src], query=self.aggegrate(query[-1], geo='join', show=show))
         
         
         
