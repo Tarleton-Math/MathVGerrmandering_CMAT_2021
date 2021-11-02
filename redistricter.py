@@ -15,7 +15,6 @@ opts = {
     'level'                : 'cntyvtd',
     'proposal'             : 'plans2168',
     'contract'             : 'proposal',
-    'random_seed'          : 0,
     'max_steps'            : 100000,
     'report_period'        : 10,
     'save_period'          : 500,
@@ -52,7 +51,7 @@ if ok.lower() in ['n', 'no', 'stop', 'quit', 'q']:
 
 def f(random_seed):
     print(f'starting seed {random_seed}')
-    M = MCMC(**opts)
+    M = MCMC(random_seed=random_seed, **opts)
     M.run_chain()
     return M
     
