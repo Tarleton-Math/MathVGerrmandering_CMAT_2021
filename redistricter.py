@@ -28,7 +28,7 @@ opts = {
 run_opts = {
     'seed_start'      : 0,
     'jobs_per_worker' : 1,
-    'workers'         : 1,
+    'workers'         : 80,
 }
 
 if opts['proposal'][4] == 'c':
