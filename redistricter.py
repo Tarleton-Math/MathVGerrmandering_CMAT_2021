@@ -50,7 +50,6 @@ for opt, val in {**opts, **run_opts}.items():
     print(f'{opt.ljust(22, " ")}: {val}')
     
 task = input('Using options above - do you want to (r)un MCMC, (p)ost-process each run, (c)onsolidate results, or any other to quit: ').lower()
-task = 'r'
 
 a = run_opts['seed_start']
 b = min(a + run_opts['jobs_per_worker'] * run_opts['workers'], run_opts['seed_stop'])
