@@ -14,14 +14,12 @@ import multiprocessing
 opts = {
     'level'                : 'cntyvtd',
     'proposal'             : 'plans2168',
-    'contract'             : '0',
+    'contract'             : 'proposal',
     'random_seed'          : 0,
-    'max_steps'            : 10,
-    'report_period'        : 1,
+    'max_steps'            : 100000,
+    'report_period'        : 10,
     'save_period'          : 500,
-    'pop_deviation_target' : np.inf,
     'yolo_length'          : 10,
-    'defect_cap'           : np.inf,
     'election_filters'     : (
         "office='USSen' and race='general'",
         "office='President' and race='general'",
