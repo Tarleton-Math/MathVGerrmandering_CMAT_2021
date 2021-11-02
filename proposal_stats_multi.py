@@ -7,9 +7,7 @@ stats_tbl     = proposals_tbl + '_stats'
 proposals_df = read_table(proposals_tbl).query('complete').reset_index(drop=True)
 Proposals = proposals_df['proposal']
 Levels = ['tabblock', 'bg', 'tract', 'cntyvtd']
-# Contracts = ['0', '1', 'proposal']
-# Contracts = ['0']
-Contracts = ['1', 'proposal']
+Contracts = ['0', '1', 'proposal']
 P = list(it.product(Levels, Proposals, Contracts))
 
 idx_cols = ['level', 'proposal', 'contract']
