@@ -65,12 +65,14 @@ b = a + run_opts['jobs_per_worker'] * run_opts['workers']
 random_seeds = np.arange(a, b)
 
 start_time = time.time()
-if run_opts['workers'] == 1:
-    for s in random_seeds:
-        M = f(s)
-else:
-    with multiprocessing.Pool(run_opts['workers']) as pool:
-        M = pool.map(multi_f, random_seeds)
+M = MCMC(**opts)
+
+# if run_opts['workers'] == 1:
+#     for s in random_seeds:
+#         M = f(s)
+# else:
+#     with multiprocessing.Pool(run_opts['workers']) as pool:
+#         M = pool.map(multi_f, random_seeds)
 print(f'total time elapsed = {time_formatter(time.time() - start_time)}')
 
 ################ Post-Processing & Analysis #################
