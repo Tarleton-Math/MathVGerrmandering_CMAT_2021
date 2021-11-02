@@ -25,7 +25,7 @@ opts = {
         "office like 'USRep%' and race='general'"),
 }
 run_opts = {
-    'seed_start'      : 0,
+    'seed_start'      : 1000,
     'jobs_per_worker' : 1,
     'workers'         : 80,
 }
@@ -64,7 +64,7 @@ b = a + run_opts['jobs_per_worker'] * run_opts['workers']
 random_seeds = np.arange(a, b)
 
 start_time = time.time()
-M = MCMC(**opts)
+M = MCMC(**opts)#, refresh_all=('proposals'))
 
 if run_opts['workers'] == 1:
     for s in random_seeds:
