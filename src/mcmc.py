@@ -104,7 +104,6 @@ on
         self.overwrite_tbl = True
         self.record()
         self.start_time = time.time()
-        self.save_results()
         while self.plan < self.max_steps:
             self.plan += 1
             msg = f"random_seed {self.random_seed} step {self.plan} pop_deviation={self.pop_deviation:.1f}"
