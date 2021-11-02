@@ -19,15 +19,15 @@ class MCMC(Space):
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
 
-        stem = f'{self.state.abbr}_{self.census_yr}_{self.district_type}_{self.proposal}'
-        dataset = f'{root_bq}.{stem}'
-        bqclient.create_dataset(dataset, exists_ok=True)
+        self.stem = f'{self.state.abbr}_{self.census_yr}_{self.district_type}_{self.proposal}'
+        self.dataset = f'{root_bq}.{self.stem}'
+        bqclient.create_dataset(self.dataset, exists_ok=True)
         self.recs = dict()
         for src in self.sources:
             self.recs[src] = list()
-            self.path[src] = data_path / f'proposals/{stem.replace("_", "/")}'
-            self.tbls[src] = f'{dataset}.{self.level}_{self.contract}_{self.random_seed}_{src}'
-        self.output = f'{dataset}.{self.level}_{self.contract}_{self.random_seed}_all'
+            self.path[src] = data_path / f'proposals/{self.stem.replace("_", "/")}'
+            self.tbls[src] = f'{self.dataset}.{self.level}_{self.contract}_{self.random_seed}_{src}'
+        self.output = f'{self.dataset}.{self.level}_{self.contract}_{self.random_seed}_all'
             
         self.districts  = sorted({d for x, d in self.graph.nodes(data='district')})
         self.counties   = sorted({d for x, d in self.graph.nodes(data='county')})

@@ -4,6 +4,7 @@ gcs_path  = 'math_for_unbiased_maps_tx'
 
 import os, pathlib, shutil, time, datetime, dataclasses, typing, google.cloud.bigquery
 import numpy as np, pandas as pd, geopandas as gpd, networkx as nx
+from collections import defaultdict
 
 try:
     import google.cloud.bigquery_storage
@@ -198,16 +199,17 @@ def load_table(tbl, df=None, query=None, file=None, overwrite=True, preview_rows
     if df is not None:
         job = bqclient.load_table_from_dataframe(df, tbl).result()
     elif query is not None:
-        job = bqclient.query(query, job_config=google.cloud.bigquery.QueryJobConfig(destination=tbl)).result()
+        job = bqclient.query(query, job_config=google.cloud.bigquery.QueryJobConfig(destination=tbl, write_disposition='write_append')).result()
     elif file is not None:
         with open(file, mode='rb') as f:
             job = bqclient.load_table_from_file(f, tbl, job_config=google.cloud.bigquery.LoadJobConfig(autodetect=True)).result()
     else:
         raise Exception('at least one of df, query, or file must be specified')
     
+    df = True
     if preview_rows > 0:
-        head(tbl, preview_rows)
-    return tbl
+        df = read_table(tbl, rows=preview_rows)
+    return df
 
 ################# graph utilities #################
 def dict_to_df(D):

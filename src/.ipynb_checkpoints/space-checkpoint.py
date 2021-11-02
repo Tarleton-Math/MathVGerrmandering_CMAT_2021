@@ -15,15 +15,15 @@ class Space(Data):
         self.district_type = self.District_types[self.proposal[4]]
         self.disconnected_districts = set()
         
-        stem = f'{self.state.abbr}_{self.census_yr}_{self.district_type}_{self.proposal}'
-        dataset = f'{root_bq}.{stem}'
-        bqclient.create_dataset(dataset, exists_ok=True)
+        self.stem = f'{self.state.abbr}_{self.census_yr}_{self.district_type}_{self.proposal}'
+        self.dataset = f'{root_bq}.{self.stem}'
+        bqclient.create_dataset(self.dataset, exists_ok=True)
         for src in self.sources:
-            self.path[src] = data_path / f'proposals/{stem.replace("_", "/")}/{src}'
+            self.path[src] = data_path / f'proposals/{self.stem.replace("_", "/")}/{src}'
             if src in ['proposal', 'districts']:
-                self.tbls[src] = f'{dataset}.{src}'
+                self.tbls[src] = f'{self.dataset}.{src}'
             else:
-                self.tbls[src] = f'{dataset}.{self.level}_{self.contract}_{src}'
+                self.tbls[src] = f'{self.dataset}.{self.level}_{self.contract}_{src}'
         self.csv     = self.path['proposal'] / f'{self.proposal.upper()}.csv'
         self.gpickle = self.path['graph']    / f'{self.level}_{self.contract}_graph.gpickle'
 

@@ -1,1114 +1,390 @@
+# -*- coding: utf-8 -*-
 from . import *
 
 @dataclasses.dataclass
 class MCMC(Base):
-    nodes_tbl             : str
-    max_steps             : int = 0
-    random_seed           : int = 0
-    pop_diff_exp          : int = 2
-    pop_deviation_target  : float = 10.0
-    pop_deviation_stop    : bool = False
-    defect_multiplier     : float = 1.0
-    anneal                : float = 0.0
-    save                  : bool = True
-    save_period           : int = 500
-    report_period         : int = 500
-    edge_attrs            : typing.Tuple = ('distance', 'shared_perim')
-    node_attrs            : typing.Tuple = ('total_pop', 'aland', 'perim')
-    max_results           : int = None
-    batch_size            : int = 100
-    pop_deviation_thresh  : float = 10.0
-
-
-    def __post_init__(self):
-        self.start_time = time.time()
-        w = self.nodes_tbl.split('.')[-1].split('_')[1:]
-        self.abbr, self.yr, self.level, self.district_type, self.contract_thresh = w
-        self.stem = '_'.join(w)
-        self.name = f'{self.stem}_{self.random_seed}'
-
-        self.ds = f'{root_bq}.{self.stem}'
-        self.bq = self.ds + f'.{self.name}'
-        self.path = root_path / f'results/{self.stem}'
-        self.pq = self.path / f'{self.name}.parquet'
-        self.gpickle = self.pq.with_suffix('.gpickle')
-        self.tbl = f'{self.ds}.{self.stem}_0000000_allresults'
-    
-        try:
-            bqclient.create_dataset(self.ds)
-        except:
-            pass
-        self.path.mkdir(parents=True, exist_ok=True)
+    gpickle              : str = ''
+    nodes                : str = ''
+    random_seed          : int = 0
+    max_steps            : int = 10
+    report_period        : int = 1
+    save_period          : int = 500
+    pop_deviation_target : float = np.inf
+    yolo_length          : int = 10
+    defect_cap           : int = np.inf
         
+    
+    def __post_init__(self):
+        self.Sources = ('plan', 'county', 'district', 'summary')
+        super().__post_init__()
         self.random_seed = int(self.random_seed)
         self.rng = np.random.default_rng(self.random_seed)
-        self.seats_col = f'seats_{self.district_type}'
-        self.nodes_df = read_table(self.nodes_tbl, cols=['geoid', 'county', self.district_type, self.seats_col] + list(self.node_attrs)).set_index('geoid')
-        self.nodes_df['random_seed'] = self.random_seed
-        
+
+        self.gpickle = pathlib.Path(self.gpickle)
+        s = '_'
+        w = self.gpickle.stem.split(s)
+        stem = f'{root_bq}.{s.join(w[0:3])}.{s.join(w[3:5])}_{self.random_seed}'
+        self.tbls = {f'{src}_rec': f'{stem}_{src}' for src in self.Sources}
+        self.output = f'{stem}_all'
+
+        self.graph = nx.read_gpickle(self.gpickle)
+        self.districts  = sorted({d for x, d in self.graph.nodes(data='district')})
+        self.counties   = sorted({d for x, d in self.graph.nodes(data='county')})
+        self.total_pop  = sum(d for x, d in self.graph.nodes(data='total_pop'))
+        self.target_pop = self.total_pop / len(self.districts)
+        self.get_adj()
         self.plan = 0
-        self.get_districts()
-        self.total_pop  = self.nodes_df['total_pop'].sum()
-        self.target_pop = self.total_pop / Seats[self.district_type]
-        self.get_splits()
-        self.defect_init = self.defect
-        self.defect_cap = int(self.defect_multiplier * self.defect_init)
-        print(f'defect_init = {self.defect_init}, setting ceiling for mcmc of {self.defect_cap}')
-
-        
-    def get_districts(self):
-        grp = self.nodes_df.groupby(self.district_type)
-        self.districts = {k:tuple(sorted(v)) for k,v in grp.groups.items()}
-        self.partition = tuple(sorted(self.districts.values()))
-        self.hash = self.partition.__hash__()
-        
-    def edges_to_graph(self, edges):
-        return nx.from_pandas_edgelist(edges, source=f'geoid_x', target=f'geoid_y', edge_attr=self.edge_attrs)
+        self.update()
+            
+            
+    def post_process(self):
+        print(f'post-processing')
+        summary_cols  = ['hash'     , 'pop_deviation', 'polsby_popper', 'intersect_defect', 'whole_defect', 'defect']
+        district_cols = ['total_pop', 'pop_deviation', 'polsby_popper'                                              , 'aland']
+        county_cols   = [                                               'intersect_defect', 'whole_defect', 'defect']
     
-    def get_components_district(self, district):
-        H = self.graph.subgraph(self.nodes_df[self.nodes_df[self.district_type] == district].index)
-        return self.get_components(H)
-        
-    def get_components(self, H):
-        return sorted([sorted(tuple(x)) for x in nx.connected_components(H)], key=lambda x:len(x), reverse=True)
-
-    def get_graph(self):
-#         rpt(f'getting edges')
         query = f"""
 select
-    *
-from (
-    select
-        x.geoid as geoid_x,
-        y.geoid as geoid_y,        
-        st_distance(x.point, y.point) / {meters_per_mile} as distance,
-        st_perimeter(st_intersection(x.polygon, y.polygon)) / 2 / {meters_per_mile} as shared_perim
-    from
-        {self.nodes_tbl} as x,
-        {self.nodes_tbl} as y
-    where
-        x.geoid < y.geoid
-        and st_intersects(x.polygon, y.polygon)
-    )
-where
-    shared_perim > 0.01
-order by
-    geoid_x, geoid_y
-"""
-        self.edges = run_query(query)
-        self.graph = self.edges_to_graph(self.edges)
+    P.random_seed,
+    P.plan,
+    P.geoid,
+    P.district,
+    N.county,
+    {join_str(1).join([f'S.{c} as {c}_plan'     for c in summary_cols ])},
+    {join_str(1).join([f'D.{c} as {c}_district' for c in district_cols])},
+    {join_str(1).join([f'C.{c} as {c}_county'   for c in county_cols  ])},
+    --N.* except (geoid, district, county),
+from
+    {self.tbls['plan_rec']} as P
+left join
+    {self.nodes} as N
+on
+    N.geoid = P.geoid
+left join
+    {self.tbls['summary_rec']} as S
+on
+    S.random_seed = P.random_seed and S.plan = P.plan
+left join
+    {self.tbls['district_rec']} as D
+on
+    D.random_seed = P.random_seed and D.plan = P.plan and D.district = P.district
+left join
+    {self.tbls['county_rec']} as C
+on
+    C.random_seed = P.random_seed and C.plan = P.plan and C.county = N.county
+"""        
+        load_table(tbl=self.output, query=query)
         
-#         print(f'connecting districts')
-        for D in np.unique(self.nodes_df[self.district_type]):
-            while True:
-                comp = self.get_components_district(D)
-#                 rpt(f"District {self.district_type} {str(D).rjust(3,' ')} component sizes = {[len(c) for c in comp]}")
-                if len(comp) == 1:
-#                     print('connected')
+        
+    def save_results(self):
+        self.report()
+        rpt('saving')
+        for src, tbl in self.tbls.items():
+            rpt(src)
+            saved = False
+            for i in range(1, 60):
+                try:
+                    load_table(tbl=tbl, df=pd.concat(self[src], axis=0), overwrite=self.overwrite_tbl)
+                    self[src] = list()
+                    saved = True
                     break
-                else:
-#                     print('regrouping to connect components')
-                    self.comp = comp
-                    for c in comp[1:]:
-                        for x in c:
-                            y = self.rng.choice(list(self.graph.neighbors(x)))
-                            self.nodes_df.loc[x, self.district_type] = self.nodes_df.loc[y, self.district_type]
+                except:
+                    time.sleep(1)
+            assert saved, f'I tried to write the result of random_seed {self.random_seed} {i} times without success - giving up'
+        self.overwrite_tbl = False
+        print(f'done')
 
-        new_districts = Seats[self.district_type] - self.nodes_df[self.district_type].nunique()
-        M = int(self.nodes_df[self.district_type].max()) + 1
-        N = self.nodes_df.nlargest(10 * new_districts, 'total_pop').index.tolist()
-        while new_districts > 0:
-            n = N.pop(0)
-#             rpt(f'try to start district {M} at node {n}')
-            D = self.nodes_df.loc[n, self.district_type]
-            self.nodes_df.loc[n, self.district_type] = M
-            comp = self.get_components_district(D)
-            if len(comp) == 1:
-#                 rpt('success')
-                M += 1
-                new_districts -= 1
-            else:
-#                 rpt('fail')
-                self.nodes_df.loc[n, self.district_type] = D
-
-        self.nodes_df['plan'] = self.plan
-        nx.set_node_attributes(self.graph, self.nodes_df.to_dict('index'))
-
-                
-
-    def get_stats(self):
-        self.get_districts()
-        self.stats = pd.DataFrame()
-        for d, N in self.districts.items():
-            H = self.graph.subgraph(N)
-            s = dict()
-            s['total_pop'] =   sum(x for a,    x in H.nodes(data='total_pop')    if x is not None)
-            internal_perim = 2*sum(x for a, b, x in H.edges(data='shared_perim') if x is not None)
-            external_perim =   sum(x for a,    x in H.nodes(data='perim')        if x is not None) - internal_perim
-            s['aland']     =   sum(x for a,    x in H.nodes(data='aland')        if x is not None)
-            s['polsby_popper'] = 4 * np.pi * s['aland'] / (external_perim**2) * 100
-            for k, v in s.items():
-                self.stats.loc[d, k] = v
-        self.stats['plan'] = int(self.plan)
-        self.stats['random_seed'] = int(self.random_seed)
-        self.stats['total_pop'] = self.stats['total_pop'].astype(int)
-        self.stats['pop_deviation'] = (self.stats['total_pop'] - self.target_pop) / self.target_pop * 100
-        self.pop_deviation = abs(self.stats['pop_deviation'].max()) + abs(self.stats['pop_deviation'].min())
-        return self.stats
-
-
-    def get_summaries(self):
-        self.get_splits()
-        self.summaries = pd.DataFrame()
-        self.summaries['random_seed'] = [self.random_seed]
-        self.summaries['plan'] = [self.plan]
-        self.summaries['hash'] = [self.hash]
-        self.summaries['polsby_popper']  = [self.stats['polsby_popper'].mean()]
-        self.summaries['pop_deviation'] = [self.pop_deviation]
-        self.summaries['intersect_defect'] = [self.intersect_defect]
-        self.summaries['whole_defect'] = [self.whole_defect]
-        self.summaries['defect'] = [self.defect]
-        return self.summaries
-
-
-    def get_splits(self):
-        self.splits = self.nodes_df[['county', self.district_type, self.seats_col]].drop_duplicates()
-        self.splits['random_seed'] = self.random_seed
-        self.splits['plan'] = self.plan
-
-        self.splits = self.splits.groupby(['county', self.district_type])[self.seats_col].sum().reset_index()
-        self.splits['whole'] = self.splits.groupby(self.district_type)['county'].transform('count') <= 1
-        self.splits = self.splits.groupby('county').agg(whole=('whole', 'sum'), intersect=('whole', 'count'), target=(self.seats_col, 'sum'))
-        self.splits['whole_defect']     = (self.splits['whole']     - np.floor(self.splits['target'])).astype(int)
-        self.splits['intersect_defect'] = (self.splits['intersect'] - np.ceil (self.splits['target'])).astype(int)
-        self.splits['defect'] = self.splits['whole_defect'].abs() + self.splits['intersect_defect'].abs()
-        self.intersect_defect = self.splits['intersect_defect'].abs().sum()
-        self.whole_defect = self.splits['whole_defect'].abs().sum()
-        self.defect = self.splits['defect'].sum()
-        return self.splits
-
-
-    def report(self):
-        self.get_splits()
-        self.get_stats()
-        print(f'random_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_deviation={self.pop_deviation:.1f}, intersect_defect={self.intersect_defect}, whole_defect={self.whole_defect}', flush=True)
-
-        
+    
     def run_chain(self):
-        self.get_graph()
         self.plan = 0
+        self.update()
         self.overwrite_tbl = True
-        self.get_stats()
-        self.plans_rec     = [self.nodes_df[['random_seed', 'plan', self.district_type]]]
-        self.splits_rec    = [self.get_splits()]
-        self.stats_rec     = [self.get_stats()]
-        self.summaries_rec = [self.get_summaries()]
-        self.hash_rec    = [self.hash]
-        for k in range(1, self.max_steps+1):
-            self.plan = k
-            self.nodes_df['plan'] = self.plan
-            msg = f"random_seed {self.random_seed} plan {self.plan} pop_deviation={self.pop_deviation:.1f}"
-
-            if self.recomb():
-                self.plans_rec    .append(self.nodes_df[['random_seed', 'plan', self.district_type]])
-                self.splits_rec   .append(self.get_splits())
-                self.stats_rec    .append(self.get_stats())
-                self.summaries_rec.append(self.get_summaries())
-                self.hash_rec     .append(self.hash)
-                if self.plan % self.report_period == 0:
-                    self.report()
-                if self.plan % self.save_period == 0:
-                    self.save_results()
-                if self.pop_deviation_stop:
-                    if self.pop_deviation < self.pop_deviation_target:
-                        break
-            else:
+        self.record()
+        self.start_time = time.time()
+        while self.plan < self.max_steps:
+            self.plan += 1
+            msg = f"random_seed {self.random_seed} step {self.plan} pop_deviation={self.pop_deviation:.1f}"
+            if self.recomb() is False:
                 rpt(msg)
                 break
-        self.save_results()
-        self.report()
+            else:
+                self.record()
+                if self.plan % self.save_period == 0:
+                    self.save_results()
+                elif self.plan % self.report_period == 0:
+                    self.report()
+        if self.plan % self.save_period != 0:
+            self.save_results()
+        elif self.plan % self.report_period != 0:
+            self.report()
+        self.post_process()
         print(f'random_seed {self.random_seed} done')
 
 
-    def save_results(self):
-        nx.write_gpickle(self.graph, self.gpickle)
-        to_gcs(self.gpickle)
-        
-        def reorder(df):
-            idx = [c for c in ['random_seed', 'plan'] if c in df.columns]
-            return df[idx + [c for c in df.columns if c not in idx]]
+    def update(self):
+        for G in [self.graph, self.adj]:
+            for a in ['random_seed', 'plan']:
+                nx.set_node_attributes(G, self[a], a)
+        self.hash = get_hash(self.graph)
+        self.get_county_stats()
+        self.get_district_stats()
+        self.plan_df = graph_to_df(self.graph, 'geoid', attr=('random_seed', 'plan', 'district'))
+        H = self.adj.subgraph(self.counties)
+        self.county_df = graph_to_df(H, 'county', attr=('random_seed', 'plan', 'whole_defect', 'intersect_defect', 'defect'))
+        H = self.adj.subgraph(self.districts)
+        self.district_df =  graph_to_df(H, 'district', attr=('random_seed', 'plan', 'total_pop', 'pop_deviation', 'polsby_popper', 'aland'))
+        attr = ['random_seed', 'plan', 'hash', 'polsby_popper', 'pop_deviation', 'intersect_defect', 'whole_defect', 'defect']
+        self.summary_df = pd.DataFrame([{a:self[a] for a in attr}])
 
-        tbls = {f'{nm}_rec': f'{self.bq}_{nm}' for nm in ['plans', 'splits', 'stats', 'summaries', 'params']}
-        if len(self.plans_rec) > 0:
-            self.plans_rec     = pd.concat(self.plans_rec    , axis=0).rename_axis('geoid').reset_index()
-            self.splits_rec    = pd.concat(self.splits_rec   , axis=0).rename_axis('geoid').reset_index()
-            self.stats_rec     = pd.concat(self.stats_rec    , axis=0).rename_axis(self.district_type).reset_index()
-            self.summaries_rec = pd.concat(self.summaries_rec, axis=0)
-            self.params_rec    = pd.DataFrame()
-            for p in ['random_seed', 'max_steps', 'pop_diff_exp', 'defect_multiplier', 'anneal', 'pop_deviation_target', 'pop_deviation_stop', 'report_period', 'save_period']:
-                self.params_rec[p] = [self[p]]
-
-            for nm, tbl in tbls.items():
-                saved = False
-                for i in range(1, 60):
-                    try:
-                        load_table(tbl=tbl, df=reorder(self[nm]), overwrite=self.overwrite_tbl)
-                        self[nm] = list()
-                        saved = True
-                        break
-                    except:
-                        time.sleep(1)
-                assert saved, f'I tried to write the result of random_seed {self.random_seed} {i} times without success - giving up'
-            self.overwrite_tbl = False
+    
+    def record(self):
+        self.update()
+        for a in ['plan', 'county', 'district', 'summary', 'hash']:
+            r = f'{a}_rec'
+            if a == 'hash':
+                X = self.hash
+            else:
+                X = self[f'{a}_df'].copy()
+            try:
+                self[r].append(X)
+            except:
+                self[r] = [X]
 
 
-    def edges_tuple(self, G=None):
-        if G is None:
-            G = self.graph
-        return tuple(sorted(tuple((min(u,v), max(u,v)) for u, v in G.edges)))
-        
+    def report(self):
+        print(f'random_seed {self.random_seed}: step {self.plan} {time_formatter(time.time() - self.start_time)}, pop_deviation={self.pop_deviation:.1f}, intersect_defect={self.intersect_defect}, whole_defect={self.whole_defect}, defect={self.defect}', flush=True)
+
 
     def recomb(self):
-        self.nodes_df['old'] = self.nodes_df[self.district_type].copy()
-        self.get_stats()
-        def gen(pop_diff):
-            while len(pop_diff) > 0:
-                pop_diff /= pop_diff.sum()
-                a = self.rng.choice(pop_diff.index, p=pop_diff)
-                pop_diff.pop(a)
-                yield a
-        L = self.stats['total_pop']
-        pop_diff = pd.DataFrame([(x, y, abs(p-q)) for x, p in L.iteritems() for y, q in L.iteritems() if x < y]).set_index([0,1]).squeeze()
-        pop_diff = (pop_diff / pop_diff.sum()) ** self.pop_diff_exp
-        pairs = gen(pop_diff)
+        # Make backups - used to undo rejected steps
+        self.update()
+        self.graph_backup = self.graph.copy()
+        self.adj_backup   = self.adj.copy()
+
+        def accept():
+            for dist, comp in zip(districts, components):
+                cuts = tuple((dist, cty) for cty in self.adj[dist])
+                self.adj.remove_edges_from(cuts)  # cut all edges of self.adj touching d0 or d1
+                for n in comp:
+                    self.graph.nodes[n]['district'] = dist  # relabel nodes
+                    self.adj.add_edge(dist, self.graph.nodes[n]['county'])
+
+        def reject():
+            T.add_edge(*e)  # restore e
+            self.adj = self.adj_backup.copy()  # restore self.adj
+            for n in H.nodes:
+                self.graph.nodes[n]['district'] = self.graph_backup.nodes[n]['district']
+
+        # Make generator to yield district pairs in random order weighted by population difference
+        # yields pairs with large pop difference first to encourage convergence to population balance.
+        # To disable weighting (purely random sample), set pop_diff_exp=0
+        # Make dataframe of district pairs with pop_difference raised to pop_diff_exp
+        def gen(R):
+            while len(R) > 0:
+                p = R / R.sum()
+                r = self.rng.choice(R.index, p=p)  # yield from remaining pairs with prefence for larger population difference
+                R.pop(r)
+                yield r
+        push_deviation = self.pop_deviation > self.pop_deviation_target
+        pop_diff_exp = 2 * push_deviation
+        P = self.district_df[['district', 'total_pop']].values
+        Q = pd.DataFrame([(x, y, abs(p-q)) for x, p in P for y, q in P if x < y]).set_index([0,1]).squeeze()
+        R = (Q / Q.sum()) ** pop_diff_exp
+        pairs = gen(R)
+        
         while True:
             try:
-                d0, d1 = next(pairs)
+                districts = next(pairs)
             except StopIteration:
                 rpt(f'exhausted all district pairs - I think I am stuck')
                 return False
-            except Exception as e:
-                raise Exception(f'unknown error {e}')
-            m = list(self.districts[d0]+self.districts[d1])  # nodes in d0 or d1
-            H = self.graph.subgraph(m).copy()  # subgraph on those nodes
-            if not nx.is_connected(H):  # if H is not connect, go to next district pair
-#                     rpt(f'{d0},{d1} not connected')
+
+            H = district_view(self.graph, districts)
+            if not nx.is_connected(H):  # if H not connected, go to next district pair
                 continue
-#                 else:
-#                     rpt(f'{d0},{d1} connected')
-            P = self.stats['total_pop'].copy()
-            p0 = P.pop(d0)
-            p1 = P.pop(d1)
-            q = p0 + p1
+
+            P = self.district_df.set_index('district')['total_pop']
+            q = P.pop(districts[0]) + P.pop(districts[1])
+            p_min, p_max = P.min(), P.max()
             # q is population of d0 & d1
             # P lists all OTHER district populations
-            P_min, P_max = P.min(), P.max()
+            # So P_min & P_max are the min & max population of all districts except d0 & d1
 
             trees = []  # track which spanning trees we've tried so we don't repeat failures
-            for i in range(100):  # max number of spanning trees to try
-                for e in self.edges_tuple(H):
+            Edges = get_edges(H)
+            for i in range(100):  # max number of spanning trees to try before going to next district pair
+                # We want a random spanning tree, but networkx can only deterministically find a MINIMUM spanning tree (Kruskal's algorithm).
+                # So, we first assign random weights to the edges then find MINIMUM spanning tree based on those random weights
+                # thus producing a random spanning tree.
+                for e in Edges:
                     H.edges[e]['weight'] = self.rng.uniform()
-                T = nx.minimum_spanning_tree(H)  # find minimum spanning tree - we assiged random weights so this is really a random spanning tress
-                h = self.edges_tuple(T).__hash__()  # hash tree for comparion
+                T = nx.minimum_spanning_tree(H)
+                h = get_edges(T).__hash__()   # store T's hash so we avoid trying it again later if it fails
                 if h not in trees:  # prevents retrying a previously failed treee
                     trees.append(h)
-                    # try to make search more efficient by searching for a suitable cut edge among edges with high betweenness-centrality
-                    # Since cutting an edge near the perimeter of the tree is veru unlikely to produce population balance,
+                    # Make search for good edge cut with population balance more efficient by looking at edges with high betweenness-centrality.
+                    # Since cutting an edge near the leaves of the tree is very unlikely to produce population balance,
                     # we focus on edges near the center.  Betweenness-centrality is a good metric for this.
                     B = nx.edge_betweenness_centrality(T)
                     B = sorted(B.items(), key=lambda x:x[1], reverse=True)  # sort edges on betweenness-centrality (largest first)
-                    for e, cent in B:
-                        if cent < 0.01:
+                    for e, bw_centrality in B:
+                        if bw_centrality < 0.1: # We exhausted all good edges - move on to next tree
                             break
                         T.remove_edge(*e)
-                        comp = nx.connected_components(T)  # T nows has 2 components
-                        next(comp)  # second one tends to be smaller → faster to sum over → skip over the first component
-                        s = sum(H.nodes[n]['total_pop'] for n in next(comp))  # sum population in component 2
-                        t = q - s  # pop of component 0 (recall q is the combined pop of d0&d1)
+                        components = get_components(T, sort=False)  # T nows has 2 components
+                        next(components)  # second component tends to be smaller → faster to sum over
+                        s = sum(H.nodes[n]['total_pop'] for n in next(components))  # sum population in second component 
+                        t = q - s  # population in first component (recall q is the combined population of d0 & d1)
                         if s > t:  # ensure s < t
                             s, t = t, s
-                        pop_deviation_new = (abs(max(t, P_max) - self.target_pop) + abs(min(s, P_min) - self.target_pop)) / self.target_pop * 100  # compute new pop deviation
+                        pop_deviation_min = self.target_pop - min(s, p_min)
+                        pop_deviation_max = max(t, p_max) - self.target_pop
+                        pop_deviation_new = (pop_deviation_min + pop_deviation_max) / self.target_pop * 100  # new pop deviation
                         
-                        comp = self.get_components(T)
-                        if self.pop_deviation > self.pop_deviation_target:
+                        # Phase 1: If pop_deviation too high, reject steps that increase it
+                        if push_deviation:
                             if pop_deviation_new > self.pop_deviation:
                                 T.add_edge(*e)
                                 continue
-                            else:
-                                self.nodes_df.loc[comp[0], self.district_type] = d0
-                                self.nodes_df.loc[comp[1], self.district_type] = d1
-                                self.get_splits()
-                                if self.defect > self.defect_cap:
-                                    T.add_edge(*e)
-                                    self.nodes_df[self.district_type] = self.nodes_df['old']
-                                    self.get_splits()
-                                    self.get_stats()
-                                    continue
+                        # Phase 2: If pop_deviation within target range, reject steps that would leave target range
                         else:
                             if pop_deviation_new > self.pop_deviation_target:
                                 T.add_edge(*e)
                                 continue
-                            else:
-                                defect_old = self.defect
-                                self.nodes_df.loc[comp[0], self.district_type] = d0
-                                self.nodes_df.loc[comp[1], self.district_type] = d1
-                                self.get_splits()
-                                if self.defect > defect_old:
-                                    T.add_edge(*e)
-                                    self.nodes_df[self.district_type] = self.nodes_df['old']
-                                    self.get_splits()
-                                    self.get_stats()
-                                    continue
-                            
-                        
-#                         if I < 0:
-#                             if self.anneal < 1e-7:
-#                                 if I < -0.01:
-#                                     T.add_edge(*e)  #  if pop_balance not achieved, re-insert e
-#                                     continue
-#                             elif self.rng.uniform() > np.exp(I / self.anneal):
-#                                 T.add_edge(*e)  #  if pop_balance not achieved, re-insert e
-#                                 continue
-                            
+
+                        components = get_components(T)
+                        accept()
+                         # if we've seen that plan recently, reject and try again
+                        h = get_hash(self.graph)
+                        if h in self.hash_rec[-self.yolo_length:]:
+                            reject()
+                            continue
+
+#                         if defect exceeds cap, reject and try again
+                        old_defect = self.defect
+                        self.get_county_stats()
+                        if self.defect > self.defect_cap and self.defect > old_defect:
+                            reject()
+                            self.get_county_stats()
+                            continue
+
+                        self.update()
+                        assert abs(self.pop_deviation - pop_deviation_new) < 1e-2, f'disagreement betwen pop_deviation calculations {self.pop_deviation} v {pop_deviation_new}'
 
                         # We found a good cut edge & made 2 new districts.  They will be label with the values of d0 & d1.
                         # But which one should get d0?  This is surprisingly important so colors "look right" in animations.
                         # Else, colors can get quite "jumpy" and give an impression of chaos and instability
                         # To achieve this, add aland of nodes that have the same od & new district label
                         # and subtract aland of nodes that change district label.  If negative, swap d0 & d1.
-                        
-                        X = self.nodes_df.loc[m].groupby([self.district_type, 'old'])['aland'].sum().reset_index()
-                        mask = X[self.district_type] == X['old']
-                        if np.sum(X.loc[mask,'aland']) < np.sum(X.loc[~mask,'aland']):
-                            d0, d1 = d1, d0
-                            self.nodes_df.loc[comp[0], self.district_type] = d0
-                            self.nodes_df.loc[comp[1], self.district_type] = d1
-                            self.get_splits()
-                            self.get_stats()
-
-
-#                         x = H.nodes(data=True)
-#                         s = (sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]==d0) -
-#                              sum(x[n]['aland'] for n in comp[0] if x[n][self.district_type]!=d0) +
-#                              sum(x[n]['aland'] for n in comp[1] if x[n][self.district_type]==d1) -
-#                              sum(x[n]['aland'] for n in comp[1] if x[n][self.district_type]!=d1))
-#                         if s < 0:
-#                             d0, d1 = d1, d0
-                                
-#                         # Update district labels
-#                         for n in comp[0]:
-#                             self.graph.nodes[n][self.district_type] = d0
-#                         for n in comp[1]:
-#                             self.graph.nodes[n][self.district_type] = d1
-                            
-                            
-                        # update stats
-                        self.get_stats()
-                        assert abs(self.pop_deviation - pop_deviation_new) < 1e-2, f'disagreement betwen pop_deviation calculations {self.pop_deviation} v {pop_deviation_new}'
-                        if self.hash in self.hash_rec: # if we've already seen that plan before, reject and keep trying for a new one
-#                             rpt(f'duplicate plan {self.hash}')
-                            T.add_edge(*e)
-                            self.nodes_df[self.district_type] = self.nodes_df['old']
-                            self.get_splits()
-                            self.get_stats()
-                            
-                        else:  # if this is a never-before-seen plan, keep it and return happy
-#                             rpt(f'recombed {self.district_type} {d0} & {d1} got pop_deviation={self.pop_deviation:.2f}%')
-                            return True
-
-
-
+                        s = 0
+                        for dist, comp in zip(districts, components):
+                            for n in comp:
+                                ds = self.graph.nodes[n]['aland']
+                                if self.graph.nodes[n]['district'] == dist:
+                                    s += ds
+                                else:
+                                    s -= ds
+                        if s < 0:
+                            components[0], components[1] = components[1], components[0]
+                            accept()
+                            self.update()
+                        return True
 
         
-    def post_process(self):
-        u = '\nunion all\n'
-        self.tbls = dict()
-        for src_tbl in bqclient.list_tables(self.ds, max_results=self.max_results):
-            full  = src_tbl.full_table_id.replace(':', '.')
-            short = src_tbl.table_id
-            random_seed = short.split('_')[-2]
-            key  = short.split('_')[-1]
-            if random_seed.isnumeric():
+    def get_county_stats(self):
+        # The "county-line" rule prefers minimal county & district splitting. We implement as follows:
+        # seats_share = county population / distrinct ideal population
+        # Ideally, county should wholly contain floor(seats_share) and intersect ceiling(seats_share) districts
+        # Ex: County seats_share=2.4, so it should ideally wholly contain 2 districts and intersect a 3rd.
+        # whole_defect = |actual wholly contained - floor(seats_share)|
+        # intersect_defect = |actual intersected - ceil(seats_share)|
+        # defect = whole_defect + intersect_defect
+        self.intersect_defect = 0
+        self.whole_defect = 0
+        self.defect = 0
+        for c in self.counties:
+            w = sum(self.adj.degree[d] == 1 for d in self.adj[c])
+            dw = abs(self.adj.nodes[c]['whole_target'] - w)
+            i = self.adj.degree[c]
+            di = abs(self.adj.nodes[c]['intersect_target'] - i)
+            self.whole_defect += dw
+            self.intersect_defect += di
+            self.defect += (dw + di)
+            
+            self.adj.nodes[c]['whole'] = w
+            self.adj.nodes[c]['intersect'] = i            
+            self.adj.nodes[c]['whole_defect'] = dw
+            self.adj.nodes[c]['intersect_defect'] = di
+            self.adj.nodes[c]['defect'] = (dw + di)
+            
+            
+    def get_district_stats(self):
+        # compute district stats & store in self.adj
+        # initialize to 0
+        attrs = ['total_pop', 'aland', 'perim']
+        for d in self.districts:
+            for a in attrs:
+                self.adj.nodes[d][a] = 0
+            self.adj.nodes[d]['internal_perim'] = 0
+        
+        # iterate over nodes in self.graph and increment corresponding district node in self.adj
+        for n, data_node in self.graph.nodes(data=True):
+            d = data_node['district']
+            for a in attrs:
+                self.adj.nodes[d][a] += data_node[a]
+
+        # iterate over edges in self.graph and increment corresponding district node in self.adj
+        for u, v, data_edge in self.graph.edges(data=True):
+            d = self.graph.nodes[u]['district']
+            if self.graph.nodes[v]['district'] == d: # if u & v in same district, (u, v) is an internal edge
+                self.adj.nodes[d]['internal_perim'] += 2 * data_edge['shared_perim']  # must double because this boundary piece counts in perim for BOTH u & v
+
+        dev_min =  10000
+        dev_max = -10000
+        self.polsby_popper = 0
+        for d in self.districts:
+            stats = self.adj.nodes[d]
+            # computer external_perim & polsby-popper (aland, perim, & internal perim computed in prior loops)
+            stats['external_perim'] = stats['perim'] - stats['internal_perim']
+            stats['polsby_popper'] = 4 * np.pi * stats['aland'] / (stats['external_perim']**2) * 100
+            self.polsby_popper += stats['polsby_popper']
+            
+            # compute pop_deivations and update dev_min & dev_max
+            stats['pop_deviation'] = (stats['total_pop'] - self.target_pop) / self.target_pop * 100
+            dev_min = min(dev_min, stats['pop_deviation'])
+            dev_max = max(dev_max, stats['pop_deviation'])
+        self.pop_deviation = abs(dev_max) + abs(dev_min)
+        self.polsby_popper /= len(self.districts)
+        
+        
+    def get_adj(self):
+        src = 'adj'
+        # Create the county-district bi-partite adjacency graph.
+        # This graph has 1 node for each county and district &
+        # an edge for all (county, district) that intersect (share land).
+        # It is an efficient tool to track map defect and other properties.
+        self.adj = nx.Graph()
+        for n, data in self.graph.nodes(data=True):
+            D = data['district']
+            self.adj.add_node(D)  # adds district node if not already present
+            self.adj.nodes[D]['polsby_popper'] = 0
+            for k in ['total_pop', 'aland', 'perim']:
                 try:
-                    self.tbls[random_seed][key] = full
+                    self.adj.nodes[D][k] += data[k]  # add to attribute if exists
                 except:
-                    self.tbls[random_seed] = {key : full}
+                    self.adj.nodes[D][k] = data[k]  # else create attribute
 
-        self.tbls = {random_seed : tbls for random_seed, tbls in self.tbls.items() if len(tbls)>=3}
-        self.cols = [c for c in get_cols(self.nodes_tbl) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
-        
-        def run_batches(query_list, batch_size=self.batch_size, tbl=self.tbl, run=True):
-            temp_tbls = list()
-            k = 0
-            while query_list:
-                query = query_list.pop()
+            C = data['county']
+            self.adj.add_node(C)  # adds county node if not already present
+            for k in ['total_pop', 'seats']:
                 try:
-                    query_stack = query_stack + u + query
+                    self.adj.nodes[C][k] += data[k]  # add to attribute if exists
                 except:
-                    query_stack = query
-                    
-                if len(query_list) % batch_size == 0:
-                    temp_tbls.append(f'{tbl}_{k}')
-                    if run:
-                        load_table(tbl=temp_tbls[-1], query=query_stack)
-                    print(f'{len(query_list)} remain')
-                    del query_stack
-                    k += 1
-            return temp_tbls
+                    self.adj.nodes[C][k] = data[k]  # else create attribute
 
+            self.adj.add_edge(C, D)  # create edge
 
-        
-        print('stacking hashes into batches')
-        self.hash_query_list = [f"""
-select
-    random_seed,
-    plan,
-    A.hash as hash_plan
-from
-    {tbls["summaries"]} as A""" for random_seed, tbls in self.tbls.items()]
-        self.hash_tbl = f'{self.tbl}_hash'
-        self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=True)
-
-
-        print('stacking hash batches')
-        self.hash_batch_stack = u.join([f'select * from {tbl}' for tbl in self.hash_temp_tbls])
-        self.hash_batch_stack = f"""
-select
-    * except (r)
-from (
-    select
-        *,
-        row_number() over (partition by hash_plan order by plan asc, random_seed asc) as r
-    from (
-        {subquery(self.hash_batch_stack, indents=1)}
-        )
-    )
-where
-    r = 1
-"""
-        load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
-
-
-        print('joining tables in batches')
-        self.join_query_list = [f"""
-select
-    H.random_seed,
-    H.plan,
-    H.{self.district_type},
-    I.hash as hash_plan,
-    J.* except (random_seed),
-    I.whole_defect as whole_defect_plan,
-    I.intersect_defect as intersect_defect_plan,
-    I.defect as defect_plan,
-    I.pop_deviation as pop_deviation_plan,
-    H.pop_deviation as pop_deviation_district,
-    I.polsby_popper as polsby_popper_plan,
-    H.polsby_popper as polsby_popper_district,
-    H.aland,
-    H.total_pop,
-    case when H.aland > 0 then H.total_pop / H.aland else 0 end as density,
-    G.* except (random_seed, plan, {self.district_type})
-from (
-    select
-        E.* except (geoid),
-        {join_str(2).join([f'sum(F.{c}) as {c}' for c in self.cols])}
-    from (
-        select
-            D.*
-        from (
-            select
-                A.random_seed,
-                A.plan
-            from
-                {self.hash_tbl} as A
-            inner join
-                {tbls['summaries']} as B
-            on
-                A.random_seed = B.random_seed and A.plan = B.plan
-            where
-                B.pop_deviation < {self.pop_deviation_thresh}
-            ) as C
-        inner join
-            {tbls['plans']} as D
-        on
-            C.random_seed = D.random_seed and C.plan = D.plan
-        ) as E
-    inner join
-        {self.nodes_tbl} as F
-    on
-        E.geoid = F.geoid
-    group by
-        random_seed, plan, {self.district_type}
-    ) as G
-inner join
-    {tbls['stats']} as H
-on
-    G.random_seed = H.random_seed and G.plan = H.plan and G.{self.district_type} = H.{self.district_type}
-inner join
-    {tbls['summaries']} as I
-on
-    H.random_seed = I.random_seed and H.plan = I.plan
-inner join
-    {tbls['params']} as J
-on
-    I.random_seed = J.random_seed
-""" for random_seed, tbls in self.tbls.items()]
-        self.join_tbl = f'{self.tbl}_join'
-        self.join_temp_tbls = run_batches(self.join_query_list, tbl=self.join_tbl, run=True)
-
-        print('stacking joined table batches')
-        self.join_batch_stack = u.join([f'select * from {tbl}' for tbl in self.join_temp_tbls])
-        self.stack_tbl = f'{self.tbl}_stack'
-        load_table(tbl=self.tbl, query=self.join_batch_stack)
-        for tbl in self.hash_temp_tbls:
-            delete_table(tbl)
-        for tbl in self.join_temp_tbls:
-            delete_table(tbl)
-
-
-# select
-#     H.random_seed,
-#     H.plan,
-#     H.{self.district_type},
-#     I.hash as hash_plan,
-#     I.whole_defect as whole_defect_plan,
-#     I.intersect_defect as intersect_defect_plan,
-#     I.defect as defect_plan,
-#     I.pop_deviation as pop_deviation_plan,
-#     H.pop_deviation as pop_deviation_district,
-#     I.polsby_popper as polsby_popper_plan,
-#     H.polsby_popper as polsby_popper_district,
-#     H.aland,
-#     H.total_pop,
-#     case when H.aland > 0 then H.total_pop / H.aland else 0 end as density
-#     G.* except (random_seed, plan, {self.district_type})
-# from (
-#     select
-#         E.*,
-#         {join_str(2).join([f'sum(F.{c}) as {c}' for c in self.cols])}
-#     from (
-#         select
-#             D.*
-#         from (
-#             select
-#                 A.random_seed,
-#                 A.plan
-#             from
-#                 self.hash_tbl as A
-#             inner join
-#                 tbl['summaries'] as B
-#             on
-#                 A.random_seed = B.random_seed and A.plan = B.plan
-#             where
-#                 B.pop_deviation < {self.pop_deviation_thresh}
-#             ) as C
-#         inner join
-#             tbl['plan'] as D
-#         on
-#             B.random_seed = C.random_seed and B.plan = C.plan
-#         ) as E
-#     inner join
-#         self.nodes_tbl as F
-#     on
-#         E.geoid = F.geoid
-#     group by
-#         random_seed, plan, {self.district_type}
-#     ) as G
-# inner join
-#     {tbls['stats']} as H
-# on
-#     G.random_seed = H.random_seed and G.plan = H.plan and G.{self.district_type} = H.{self.district_type}
-# inner join
-#     {tbls['summaries']} as I
-# on
-#     H.random_seed = I.random_seed and H.plan = I.plan
-
-
-        
-        
-        
-
-# query
-#     *
-# from
-#     tbl['plan'] as A
-# inner join
-#     self.hash_tbl as B
-# on
-#     A.random_seed = B.random_seed and A.plan = B.plan
-# inner join
-#     tbl['summaries'] as C
-# on
-#     B.random_seed = C.random_seed and B.plan = C.plan
-
-
-
-        
-        
-        
-
-#         print('joining and aggregating data')
-#         self.final_query = f"""
-# select
-#     D.*,
-#     C.* except (random_seed, plan, {self.district_type})
-# from (
-#     select
-#         A.random_seed,
-#         A.plan,
-#         A.{self.district_type},
-#         {join_str(1).join([f'sum(B.{c}) as {c}' for c in self.cols])}
-#     from
-#         {self.stack_tbl} as A
-#     inner join
-#         {self.nodes_tbl} as B
-#     on
-#         A.geoid = B.geoid
-#     group by
-#         random_seed, plan, {self.district_type}
-#     ) as C
-# inner join
-#     {self.stack_tbl} as D
-# on
-#     C.random_seed = D.random_seed and C.plan = D.plan and C.{self.district_type} = D.{self.district_type}
-# """
-#         load_table(tbl=self.tbl, query=self.final_query)
-        
-#         for tbl in self.hash_temp_tbls:
-#             delete_table(tbl)
-#         for tbl in self.join_temp_tbls:
-#             delete_table(tbl)
-#         delete_table(self.stack_tbl)
-    
-    
-#         self.final_query = f"""
-# select
-#     A.random_seed,
-#     A.plan,
-#     A.{self.district_type},
-    
-#     max(A.hash_plan) as hash_plan,
-#     max(A.pop_deviation_plan) as pop_deviation_plan,
-#     max(A.polsby_popper_plan) as polsby_popper_plan,
-#     max(A.polsby_popper_district) as polsby_popper_district,
-#     max(A.aland) as aland,
-#     max(A.total_pop) as total_pop,
-#     case when max(A.aland) > 0 then max(A.total_pop) / max(A.aland) else 0 end as density,
-#     {join_str(1).join([f'sum(B.{c}) as {c}' for c in self.cols])}
-# from
-#     {self.stack_tbl} as A
-# inner join
-#     {self.nodes_tbl} as B
-# on
-#     A.geoid = B.geoid
-# group by
-#     random_seed, plan, {self.district_type}
-# """
-#         load_table(tbl=self.tbl, query=self.final_query)
-
-        
-        
-        
-        
-        
-        
-#     def post_process(self):
-#         u = '\nunion all\n'
-#         self.tbls = dict()
-#         for src_tbl in bqclient.list_tables(self.ds, max_results=self.max_results):
-#             full  = src_tbl.full_table_id.replace(':', '.')
-#             short = src_tbl.table_id
-#             random_seed = short.split('_')[-2]
-#             key  = short.split('_')[-1]
-#             if random_seed.isnumeric():
-#                 try:
-#                     self.tbls[random_seed][key] = full
-#                 except:
-#                     self.tbls[random_seed] = {key : full}
-
-#         self.tbls = {random_seed : tbls for random_seed, tbls in self.tbls.items() if len(tbls)>=3}
-#         self.cols = [c for c in get_cols(self.nodes_tbl) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
-        
-#         def run_batches(query_list, batch_size=self.batch_size, tbl=self.tbl, run=True):
-#             temp_tbls = list()
-#             k = 0
-#             while query_list:
-#                 query = query_list.pop()
-#                 try:
-#                     query_stack = query_stack + u + query
-#                 except:
-#                     query_stack = query
-                    
-#                 if len(query_list) % batch_size == 0:
-#                     temp_tbls.append(f'{tbl}_{k}')
-#                     if run:
-#                         load_table(tbl=temp_tbls[-1], query=query_stack)
-#                     print(f'{len(query_list)} remain')
-#                     del query_stack
-#                     k += 1
-#             return temp_tbls
-
-
-        
-#         print('stacking hashes into batches')
-#         self.hash_query_list = [f"""
-# select
-#     random_seed,
-#     plan,
-#     A.hash as hash_plan
-# from
-#     {tbls["summaries"]} as A""" for random_seed, tbls in self.tbls.items()]
-#         self.hash_tbl = f'{self.tbl}_hash'
-#         self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=False)
-
-
-#         print('stacking hash batches')
-#         self.hash_batch_stack = u.join([f'select * from {tbl}' for tbl in self.hash_temp_tbls])
-#         self.hash_batch_stack = f"""
-# select
-#     *
-# from (
-#     select
-#         *,
-#         row_number() over (partition by hash_plan order by plan asc, random_seed asc) as r
-#     from (
-#         {subquery(self.hash_batch_stack, indents=1)}
-#         )
-#     )
-# where
-#     r = 1
-# """
-# #         load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
-
-
-
-#         print('joining tables in batches')
-    
-    
-    
-    
-#     query = f"""
-# select
-#     *
-# from (
-#     select
-#         *
-#     from (
-#         select
-#             A.random_seed,
-#             A.plan,
-#             A.{self.district_type},
-#             {join_str(1).join([f'sum(B.{c}) as {c}' for c in self.cols])}
-#         from
-#             {tbls['plans']} as A
-#         inner join
-        
-        
-        
-#         {self.nodes_tbl} as B
-#     on
-#         A.geoid = B.geoid
-#     group by
-#         random_seed, plan, {self.district_type}
-#     ) as C
-# inner join
-    
-# """
-    
-    
-    
-    
-    
-#         self.join_query_list = [f"""
-# select
-#     A.*,
-#     D.* except (random_seed),
-#     C.hash_plan,
-#     C.whole_defect as whole_defect_plan,
-#     C.intersect_defect as intersect_defect_plan,
-#     C.defect as defect_plan,
-#     C.pop_deviation as pop_deviation_plan,
-#     B.pop_deviation as pop_deviation_district,
-#     C.polsby_popper as polsby_popper_plan,
-#     B.polsby_popper as polsby_popper_district,
-#     B.aland,
-#     B.total_pop,
-# from (
-#     select
-#         *
-#     from
-#         {tbls['plans']}
-#     ) as A
-# inner join (
-#     select
-#         *
-#     from
-#         {tbls['stats']}
-#     ) as B
-# on
-#     A.random_seed = B.random_seed and A.plan = B.plan and A.{self.district_type} = B.{self.district_type}
-# inner join (
-#     select
-#         X.*,
-#         Y.hash_plan
-#     from (
-#         select
-#             *
-#         from
-#             {tbls['summaries']}
-#         where
-#             pop_deviation < {self.pop_deviation_thresh}
-#         ) as X
-#     inner join
-#         {self.hash_tbl} as Y
-#     on
-#         X.random_seed = Y.random_seed and X.plan = Y.plan
-#     ) as C
-# on
-#     B.random_seed = C.random_seed and B.plan = C.plan
-# inner join (
-#     {tbls['params']} as D
-# on
-#     C.random_seed = D.random_seed
-# """ for random_seed, tbls in self.tbls.items()]
-#         self.join_tbl = f'{self.tbl}_join'
-#         self.join_temp_tbls = run_batches(self.join_query_list, tbl=self.join_tbl, run=False)
-
-
-
-#         print('stacking joined table batches')
-#         self.join_batch_stack = u.join([f'select * from {tbl}' for tbl in self.join_temp_tbls])
-#         self.stack_tbl = f'{self.tbl}_stack'
-# #         load_table(tbl=self.stack_tbl, query=self.join_batch_stack)
-
-
-
-#         print('joining and aggregating data')
-#         self.final_query = f"""
-# select
-#     A.random_seed,
-#     A.plan,
-#     A.{self.district_type},
-#     max(A.hash_plan) as hash_plan,
-#     max(A.pop_deviation_plan) as pop_deviation_plan,
-#     max(nodes_plan) as nodes_plan,
-#     count(*) as nodes_district,
-#     max(A.polsby_popper_plan) as polsby_popper_plan,
-#     max(A.polsby_popper_district) as polsby_popper_district,
-#     max(A.aland) as aland,
-#     max(A.total_pop) as total_pop,
-#     case when max(A.aland) > 0 then max(A.total_pop) / max(A.aland) else 0 end as density,
-#     {join_str(1).join([f'sum(B.{c}) as {c}' for c in self.cols])}
-# from (
-#     select
-#         *,
-#         count(*) over (partition by random_seed, plan) as nodes_plan
-#     from
-#         {self.stack_tbl}
-#     ) as A
-# inner join
-#     {self.nodes_tbl} as B
-# on
-#     A.geoid = B.geoid
-# group by
-#     random_seed, plan, {self.district_type}
-# """
-#         load_table(tbl=self.tbl, query=self.final_query)
-
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-#     def post_process(self):
-#         u = '\nunion all\n'
-#         self.tbls = dict()
-#         for src_tbl in bqclient.list_tables(self.ds, max_results=self.max_results):
-#             full  = src_tbl.full_table_id.replace(':', '.')
-#             short = src_tbl.table_id
-#             random_seed = short.split('_')[-2]
-#             key  = short.split('_')[-1]
-#             if random_seed.isnumeric():
-#                 try:
-#                     self.tbls[random_seed][key] = full
-#                 except:
-#                     self.tbls[random_seed] = {key : full}
-
-#         self.tbls = {random_seed : tbls for random_seed, tbls in self.tbls.items() if len(tbls)>=3}
-#         self.cols = [c for c in get_cols(self.nodes_tbl) if c not in Levels + District_types + ['geoid', 'county', 'total_pop', 'polygon', 'aland', 'perim', 'polsby_popper', 'density', 'point']]
-        
-#         def run_batches(query_list, batch_size=self.batch_size, tbl=self.tbl, run=True):
-#             temp_tbls = list()
-#             k = 0
-#             while query_list:
-#                 query = query_list.pop()
-#                 try:
-#                     query_stack = query_stack + u + query
-#                 except:
-#                     query_stack = query
-                    
-#                 if len(query_list) % batch_size == 0:
-#                     temp_tbls.append(f'{tbl}_{k}')
-#                     if run:
-#                         load_table(tbl=temp_tbls[-1], query=query_stack)
-#                     print(f'{len(query_list)} remain')
-#                     del query_stack
-#                     k += 1
-#             return temp_tbls
-
-
-        
-#         print('stacking hashes into batches')
-#         self.hash_query_list = [f"""
-# select
-#     cast(random_seed as int) as random_seed,
-#     cast(plan as int) as plan,
-#     cast(A.hash as int) as hash_plan
-# from
-#     {tbls["summaries"]} as A""" for random_seed, tbls in self.tbls.items()]
-#         self.hash_tbl = f'{self.tbl}_hash'
-#         self.hash_temp_tbls = run_batches(self.hash_query_list, tbl=self.hash_tbl, run=False)
-
-
-#         print('stacking hash batches')
-#         self.hash_batch_stack = u.join([f'select * from {tbl}' for tbl in self.hash_temp_tbls])
-#         self.hash_batch_stack = f"""
-# select
-#     *
-# from (
-#     select
-#         *,
-#         row_number() over (partition by hash_plan order by plan asc, random_seed asc) as r
-#     from (
-#         {subquery(self.hash_batch_stack, indents=1)}
-#         )
-#     )
-# where
-#     r = 1
-# """
-# #         load_table(tbl=self.hash_tbl, query=self.hash_batch_stack)
-
-
-
-#         print('joining tables in batches')
-#         self.join_query_list = [f"""
-# select
-#     A.random_seed,
-#     A.plan,
-#     A.{self.district_type},
-#     A.geoid,
-#     C.hash_plan,
-#     D.* except (random_seed)
-#     C.whole_defect_plan,
-#     C.intersect_defect_plan,
-#     C.defect_plan,
-#     C.pop_deviation_plan,
-#     B.pop_deviation_district,
-#     C.polsby_popper_plan,
-#     B.polsby_popper_district,
-#     B.aland,
-#     B.total_pop,
-# from (
-#     select
-#         cast(random_seed as int) as random_seed,
-#         cast(plan as int) as plan,
-#         cast({self.district_type} as int) as {self.district_type},
-#         geoid,
-#     from
-#         {tbls['plans']}
-#     ) as A
-# inner join (
-#     select
-#         cast(random_seed as int) as random_seed,
-#         cast(plan as int) as plan,
-#         cast({self.district_type} as int) as {self.district_type},
-#         aland,
-#         pop_deviation as pop_deviation_district,
-#         polsby_popper as polsby_popper_district,
-#         total_pop
-#     from
-#         {tbls['stats']}
-#     ) as B
-# on
-#     A.random_seed = B.random_seed and A.plan = B.plan and A.{self.district_type} = B.{self.district_type}
-# inner join (
-#     select
-#         X.*,
-#         Y.hash_plan
-#     from (
-#         select
-#             cast(random_seed as int) as random_seed,
-#             cast(plan as int) as plan,
-#             pop_deviation as pop_deviation_plan,
-#             --pop_imbalance as pop_imbalance_plan,
-#             whole_defect as whole_defect_plan,
-#             intersect_defect as intersect_defect_plan,
-#             defect as defect_plan,
-#             polsby_popper as polsby_popper_plan
-#         from
-#             {tbls['summaries']}
-#         where
-#             pop_deviation < {self.pop_deviation_thresh}
-#             --pop_imbalance < {self.pop_deviation_thresh}
-#         ) as X
-#     inner join
-#         {self.hash_tbl} as Y
-#     on
-#         X.random_seed = Y.random_seed and X.plan = Y.plan
-#     ) as C
-# on
-#     B.random_seed = C.random_seed and B.plan = C.plan
-# inner join (
-#     {tbls['params']} as D
-# on
-#     C.random_seed = D.random_seed
-# """ for random_seed, tbls in self.tbls.items()]
-#         self.join_tbl = f'{self.tbl}_join'
-#         self.join_temp_tbls = run_batches(self.join_query_list, tbl=self.join_tbl, run=False)
-
-
-
-#         print('stacking joined table batches')
-#         self.join_batch_stack = u.join([f'select * from {tbl}' for tbl in self.join_temp_tbls])
-#         self.stack_tbl = f'{self.tbl}_stack'
-# #         load_table(tbl=self.stack_tbl, query=self.join_batch_stack)
-
-
-
-#         print('joining and aggregating data')
-#         self.final_query = f"""
-# select
-#     A.random_seed,
-#     A.plan,
-#     A.{self.district_type},
-#     max(A.hash_plan) as hash_plan,
-#     max(A.pop_deviation_plan) as pop_deviation_plan,
-#     max(nodes_plan) as nodes_plan,
-#     count(*) as nodes_district,
-#     max(A.polsby_popper_plan) as polsby_popper_plan,
-#     max(A.polsby_popper_district) as polsby_popper_district,
-#     max(A.aland) as aland,
-#     max(A.total_pop) as total_pop,
-#     case when max(A.aland) > 0 then max(A.total_pop) / max(A.aland) else 0 end as density,
-#     {join_str(1).join([f'sum(B.{c}) as {c}' for c in self.cols])}
-# from (
-#     select
-#         *,
-#         count(*) over (partition by random_seed, plan) as nodes_plan
-#     from
-#         {self.stack_tbl}
-#     ) as A
-# inner join
-#     {self.nodes_tbl} as B
-# on
-#     A.geoid = B.geoid
-# group by
-#     random_seed, plan, {self.district_type}
-# """
-#         load_table(tbl=self.tbl, query=self.final_query)
+        # get defect targets
+        for C in self.counties:
+            self.adj.nodes[C]['whole_target']     = int(np.floor(self.adj.nodes[C]['seats']))
+            self.adj.nodes[C]['intersect_target'] = int(np.ceil (self.adj.nodes[C]['seats']))
