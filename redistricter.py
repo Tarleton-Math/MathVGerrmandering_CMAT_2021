@@ -14,11 +14,12 @@ import multiprocessing
 opts = {
     'abbr'                 : 'TX',
     'level'                : 'cntyvtd',
-    'proposal'             : 'plans2168',
+    # 'proposal'             : 'plans2168',
+    'proposal'             : 'planh2316',
     'contract'             : 'proposal',
-    'max_steps'            : 2000,
-    'report_period'        : 10,
-    'save_period'          : 100,
+    'max_steps'            : 3000,
+    'report_period'        : 100,
+    'save_period'          : 500,
     'yolo_length'          : 10,
     'election_filters'     : (
         "office='USSen' and race='general'",
