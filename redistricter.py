@@ -13,12 +13,12 @@ from src.mcmc import *
 import multiprocessing
 opts = {
     'abbr'                 : 'TX',
-    'level'                : 'cntyvtd',
+    'level'                : 'tabblock',
     'proposal'             : 'plans2168',
     'contract'             : 'proposal',
-    'max_steps'            : 100000,
+    'max_steps'            : 2000,
     'report_period'        : 10,
-    'save_period'          : 500,
+    'save_period'          : 100,
     'yolo_length'          : 10,
     'election_filters'     : (
         "office='USSen' and race='general'",
@@ -28,8 +28,8 @@ opts = {
 run_opts = {
     'seed_start'      : 1000,
     'seed_stop'       : 10000000000000,
-    'jobs_per_worker' : 80,
-    'workers'         : 1,
+    'jobs_per_worker' : 1,
+    'workers'         : 80,
 }
 
 if opts['proposal'][4] == 'c':
@@ -49,9 +49,9 @@ else:
 for opt, val in {**opts, **run_opts}.items():
     print(f'{opt.ljust(22, " ")}: {val}')
     
-# task = input('Using options above - do you want to (r)un MCMC, (p)ost-process each run, (c)onsolidate results, or any other to quit: ').lower()
+task = input('Using options above - do you want to (r)un MCMC, (p)ost-process each run, (c)onsolidate results, or any other to quit: ').lower()
 
-task = 'p'
+# task = 'p'
 
 a = run_opts['seed_start']
 b = min(a + run_opts['jobs_per_worker'] * run_opts['workers'], run_opts['seed_stop'])
