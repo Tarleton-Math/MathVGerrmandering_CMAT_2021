@@ -48,7 +48,7 @@ def f(idx):
     print(f'finished {idx}')
 
 def multi_f(idx):
-    time.sleep(5 * multiprocessing.current_process()._identity[0])
+    time.sleep(multiprocessing.current_process()._identity[0])
     return f(idx)
 
 # for idx in P[:2]:
