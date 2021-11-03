@@ -13,7 +13,7 @@ from src.mcmc import *
 import multiprocessing
 opts = {
     'abbr'                 : 'TX',
-    'level'                : 'cntyvtd',
+    'level'                : 'tabblock',
     'proposal'             : 'plans2168',
     'contract'             : 'proposal',
     'max_steps'            : 2000,
@@ -43,12 +43,12 @@ elif opts['proposal'][4] == 'h':
     opts['defect_cap'] = 10
 else:
     raise Exception(f'unknown proposal {opts["proposal"]}')
-    
+
 
 
 for opt, val in {**opts, **run_opts}.items():
     print(f'{opt.ljust(22, " ")}: {val}')
-    
+
 task = input('Using options above - do you want to (r)un MCMC, (p)ost-process each run, (c)onsolidate results, or any other to quit: ').lower()
 
 # task = 'p'
@@ -92,40 +92,40 @@ elif task in ['c', 'consolidate']:
     M = MCMC(**opts)
     M.tbls['final']  = f'{M.dataset}.all'
     M.tbls['hashes'] = f'{M.tbls["final"]}_hashes'
-    src_tbls = dict()
-    for t in bqclient.list_tables(M.dataset):
-        full  = t.full_table_id.replace(':', '.')
-        short = t.table_id
-        w = short.split('_')
-        if len(w) >= 4 and w[0] == M.level and w[1] == M.contract and int(w[2]) in random_seeds:
-            # src_tbls.setdefault(w[2], {}).setdefault(w[3], full)
-            # src_tbls.setdefault(w[2], {}).update({w[3]:full})
-            src_tbls.setdefault(w[2], {})[w[3]] = full
-    src_tbls = {k: v for k, v in src_tbls.items() if len(v)>= 4}
-    
-    query = ['\nunion all\n'.join([f"select A.random_seed, A.plan, A.hash as hash_plan from {tbls['summary']} as A" for seed, tbls in src_tbls.items()])]
-    query.append(f"""
-select
-    *,
-    row_number() over (partition by hash_plan order by random_seed asc, plan asc) as r
-from (
-    {subquery(query[-1])}
-    )
-""")
-    query.append(f"""
-select
-    * except (r),
-from (
-    {subquery(query[-1])}
-    )
-where
-    r = 1
-order by
-    random_seed asc, plan asc
-""")
-    
+#     src_tbls = dict()
+#     for t in bqclient.list_tables(M.dataset):
+#         full  = t.full_table_id.replace(':', '.')
+#         short = t.table_id
+#         w = short.split('_')
+#         if len(w) >= 4 and w[0] == M.level and w[1] == M.contract and int(w[2]) in random_seeds:
+#             # src_tbls.setdefault(w[2], {}).setdefault(w[3], full)
+#             # src_tbls.setdefault(w[2], {}).update({w[3]:full})
+#             src_tbls.setdefault(w[2], {})[w[3]] = full
+#     src_tbls = {k: v for k, v in src_tbls.items() if len(v)>= 4}
+
+#     query = ['\nunion all\n'.join([f"select A.random_seed, A.plan, A.hash as hash_plan from {tbls['summary']} as A" for seed, tbls in src_tbls.items()])]
+#     query.append(f"""
+# select
+#     *,
+#     row_number() over (partition by hash_plan order by random_seed asc, plan asc) as r
+# from (
+#     {subquery(query[-1])}
+#     )
+# """)
+#     query.append(f"""
+# select
+#     * except (r),
+# from (
+#     {subquery(query[-1])}
+#     )
+# where
+#     r = 1
+# order by
+#     random_seed asc, plan asc
+# """)
+
 #     load_table(tbl=M.tbls['hashes'], query=query[-1])
-    
+
     N = run_query(f"select count(*) from {M.tbls['hashes']}").iloc[0,0]
     print(N)
 #     chunks = 10000
@@ -145,15 +145,15 @@ order by
 #         load_table(tbl=M.tbls['final'], query=query[-1], overwrite=start==0)
 
 
-    
+
 #     print(df.head(3))
 #     print(df.dtypes)
 #     print(df['hash_plan'].value_counts().sort_values())
-    
+
 #         summary_cols  = ['hash'     , 'pop_deviation', 'polsby_popper', 'intersect_defect', 'whole_defect', 'defect']
 #         district_cols = ['total_pop', 'pop_deviation', 'polsby_popper'                                              , 'aland']
 #         county_cols   = [                                               'intersect_defect', 'whole_defect', 'defect']
-    
+
 #         query = f"""
 # select
 #     P.random_seed,
@@ -186,24 +186,24 @@ order by
 # """        
 
     
-    
+
 #     df = run_query(query[-1])
 #     print(df['hash_plan'].value_counts().sort_values())
-            
+
             # tbls.setdefault(w[3], []).append(full)
     # print(src_tbls)
             
         
         # if M.level in short and M.contract in short:
             # print(short)
-        
+
 #         print(full)
         # print(short)
-    
-    
+
     
 
-################ Post-Processing & Analysis #################
+
+# ############### Post-Processing & Analysis #################
 # from src.analysis import *
 # start = time.time()
 # A = Analysis(nodes_tbl=G.nodes.tbl)#, batch_size=2, max_results=20)
