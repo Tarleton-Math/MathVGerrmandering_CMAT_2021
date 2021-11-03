@@ -40,8 +40,8 @@ def f(idx):
     for attr in ['level', 'proposal', 'contract', 'pop_deviation', 'intersect_defect', 'whole_defect', 'defect']:
         df.loc[0, attr] = M[attr]
     attr = 'disconnected_districts'
-    df.loc[idx, attr] = ','.join(f'{i}' for i in sorted(M[attr]))
-    df.loc[idx, attr+'_count'] = int(len(M[attr]))
+    df.loc[0, attr] = ','.join(f'{i}' for i in sorted(M[attr]))
+    df.loc[0, attr+'_count'] = int(len(M[attr]))
     print(df)
     load_table(stats_tbl, df=df, overwrite=False)
     print(f'finished {idx}')
