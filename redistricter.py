@@ -18,7 +18,7 @@ opts = {
     'proposal'             : 'planh2316',
     'contract'             : 'proposal',
     'max_steps'            : 3000,
-    'report_period'        : 100,
+    'report_period'        : 25,
     'save_period'          : 500,
     'yolo_length'          : 10,
     'election_filters'     : (
