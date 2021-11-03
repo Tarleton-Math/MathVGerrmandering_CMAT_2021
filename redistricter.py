@@ -28,8 +28,8 @@ opts = {
 run_opts = {
     'seed_start'      : 1000,
     'seed_stop'       : 10000000000000,
-    'jobs_per_worker' : 1,
-    'workers'         : 80,
+    'jobs_per_worker' : 80,
+    'workers'         : 1,
 }
 
 if opts['proposal'][4] == 'c':
@@ -49,7 +49,9 @@ else:
 for opt, val in {**opts, **run_opts}.items():
     print(f'{opt.ljust(22, " ")}: {val}')
     
-task = input('Using options above - do you want to (r)un MCMC, (p)ost-process each run, (c)onsolidate results, or any other to quit: ').lower()
+# task = input('Using options above - do you want to (r)un MCMC, (p)ost-process each run, (c)onsolidate results, or any other to quit: ').lower()
+
+task = 'p'
 
 a = run_opts['seed_start']
 b = min(a + run_opts['jobs_per_worker'] * run_opts['workers'], run_opts['seed_stop'])
@@ -61,7 +63,10 @@ if task in ['r', 'run', 'p']:
         M = MCMC(random_seed=random_seed, **opts)
         if task == 'p':
             print('post-processing')
-            M.post_process()
+            try:
+                M.post_process()
+            except Exception as e:
+                print(f'{random_seed} exception')
         else:
             M.run_chain()
         return M
