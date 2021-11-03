@@ -19,6 +19,7 @@ Levels = ['tabblock', 'bg', 'tract', 'cntyvtd']
 Contracts = ['0', '1', 'proposal']
 P = list(it.product(Levels, Proposals, Contracts))
 assert len(P) == 516
+delete_table(stats_tbl)
 
 def get_proposal_stats(level='tabblock', proposal='plans2168', contract=0):
     M = MCMC(level=level, proposal=proposal, contract=contract, refresh_all=('nodes', 'districts', 'graph'))
