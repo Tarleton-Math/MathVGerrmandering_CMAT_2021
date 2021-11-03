@@ -51,8 +51,8 @@ def multi_f(idx):
     time.sleep(5 * multiprocessing.current_process()._identity[0])
     return f(idx)
 
-for idx in P[:2]:
-    f(idx)
+# for idx in P[:2]:
+#     f(idx)
         
-# with multiprocessing.Pool() as pool:
-#     pool.map(multi_f, P)
+with multiprocessing.Pool() as pool:
+    pool.map(multi_f, P)
