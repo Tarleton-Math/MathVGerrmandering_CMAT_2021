@@ -46,9 +46,8 @@ else:
 
 for opt, val in {**opts, **run_opts}.items():
     print(f'{opt.ljust(22, " ")}: {val}')
-    
-task = 'c'
-# task = input('Using options above - do you want to (r)un MCMC, (p)ost-process each run, (c)onsolidate results, or any other to quit: ').lower()
+
+task = input('Using options above - do you want to (r)un MCMC, (p)ost-process each run, (c)onsolidate results, or any other to quit: ').lower()
 
 a = run_opts['seed_start']
 b = min(a + run_opts['jobs_per_worker'] * run_opts['workers'], run_opts['seed_stop'])
@@ -198,7 +197,7 @@ on
         
         print(f'finshed {seed}')
         k += 1
-        if k >= 2:
-            break
+        # if k >= 2:
+        #     break
 
     print(f'analysis took {time_formatter(time.time() - start)}')
