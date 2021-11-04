@@ -56,7 +56,8 @@ from (
         x.geoid as geoid_x,
         y.geoid as geoid_y,        
         st_distance(x.point, y.point) / {m_per_mi} as distance,
-        (x.perim + y.perim - st_perimeter(st_union(x.polygon, y.polygon)) / 2 /{m_per_mi})  as shared_perim
+        --(x.perim + y.perim - st_perimeter(st_union(x.polygon, y.polygon)) / 2 /{m_per_mi})  as shared_perim
+        (x.perim + y.perim - st_perimeter(st_union(x.polygon, y.polygon)) / {m_per_mi}) / 2  as shared_perim
     from
         {self.tbls['nodes']} as x,
         {self.tbls['nodes']} as y
